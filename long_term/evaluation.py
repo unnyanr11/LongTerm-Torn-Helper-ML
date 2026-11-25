@@ -33,9 +33,9 @@ def evaluate_horizon(prices, horizon_days: int, min_folds: int = MIN_BACKTEST_FO
     model_errors, naive_errors, actual_returns, predicted_returns = [], [], [], []
     fold_rows = []
     # Start with six months of history; step by the forecast horizon so targets do not overlap.
-    for origin_idx in range(MIN_BACKTEST_TRAIN_WEEKS, len(values) - step, step):
+    for origin_idx in range(MIN_BACKTEST_TRAIN_WEEKS, len(values) - step + 1, step):
         history = values[:origin_idx]
-        actual = values[origin_idx + step]
+        actual = values[origin_idx + step - 1]
         origin = values[origin_idx - 1]
         if min(history) <= 0 or actual <= 0:
             continue
@@ -46,7 +46,7 @@ def evaluate_horizon(prices, horizon_days: int, min_folds: int = MIN_BACKTEST_FO
         predicted_returns.append((predicted / origin) - 1.0)
         fold_rows.append({
             "origin_index": origin_idx - 1,
-            "target_index": origin_idx + step,
+            "target_index": origin_idx + step - 1,
             "origin_price": origin,
             "predicted_price": predicted,
             "actual_price": actual,
