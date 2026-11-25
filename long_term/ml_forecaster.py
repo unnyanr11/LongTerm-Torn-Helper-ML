@@ -224,7 +224,7 @@ def evaluate_ml_horizon(prices, horizon_days):
     # with only five years of weekly history.
     step = max(1, math.ceil(horizon_days / 7))
     train_cut = max(int(len(values) * 0.40), MIN_FEATURE_HISTORY + MIN_SUPERVISED_ROWS + step)
-    validation_cut = train_cut + step + max(step, MIN_VALIDATION_ROWS)
+    validation_cut = train_cut + step + max(step * MIN_VALIDATION_TRADES, MIN_VALIDATION_ROWS)
     train_mask = target_indices <= train_cut
     validation_mask = (origins > train_cut) & (target_indices <= validation_cut)
     test_mask = origins > validation_cut
