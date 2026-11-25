@@ -2,9 +2,6 @@ name: Long-term daily predictions
 
 on:
   workflow_dispatch:
-  # Recovery trigger if a chained run is interrupted or disabled temporarily.
-  schedule:
-    - cron: "0 0 * * *"
 
 permissions:
   contents: read
