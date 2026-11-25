@@ -16,7 +16,7 @@ from .ml_forecaster import evaluate_ml_horizon
 from .stock_universe import STOCKS
 
 MODEL_NAME = "multi_model_ml_forecast"
-MODEL_VERSION = "4.0.0"
+MODEL_VERSION = "5.0.0"
 DUE_HOURS = 24
 MIN_TRAIN_POINTS = 26
 MIN_VALIDATION_POINTS = 3
