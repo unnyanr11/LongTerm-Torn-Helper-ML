@@ -52,7 +52,8 @@ def fit_calibration(predicted_log_returns, actual_log_returns):
 def calibrate_matured_forecasts(cur, stock_id, analysis_range_days, horizon_days):
     """Evaluate matured forecasts and atomically promote a passing calibration."""
     cur.execute(
-        """select f.origin_week, f.origin_price, f.predicted_price, w.close_price
+        """select f.origin_week, f.origin_price,
+                  coalesce((f.validation->'calibration'->>'raw_predicted_price')::double precision,\n                           f.predicted_price), w.close_price
            from long_term.forecasts f
            join long_term.weekly_prices w
              on w.stock_id = f.stock_id and w.week_start = f.target_week
