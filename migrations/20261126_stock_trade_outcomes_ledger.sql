@@ -40,7 +40,7 @@ create table if not exists stock_central.trade_outcome_results (
 create table if not exists stock_central.trade_outcome_settings (
   user_id uuid primary key,
   min_expected_net_profit_pct numeric not null default 0.2
-    check (min_expected_net_profit_pct >= 0 and min_expected_net_profit_pct <= 100000),
+    check (min_expected_net_profit_pct >= 0),
   updated_at timestamptz not null default now()
 );
 
