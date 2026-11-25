@@ -76,10 +76,10 @@ A window needs at least 26 complete weekly observations before the prediction wo
 
 ## Trading thresholds and costs
 
-The long-term default minimum expected net return is **0.2%** after the estimated round-trip cost. The default round-trip cost is 0.30% (0.10% fee plus 0.05% slippage on each side), so the default gross forecast hurdle is 0.50%. There is no maximum expected-profit threshold. Configure the worker/backtest defaults with GitHub Actions repository Variables:
+The long-term default minimum expected net return is **0.2%** after the estimated round-trip cost. The game's 0.10% fee is charged only once, when selling. With the model's assumed 0.05% slippage on each side, the default estimated round-trip cost is 0.20%, making the default gross forecast hurdle 0.40%. There is no maximum expected-profit threshold. Configure the worker/backtest defaults with GitHub Actions repository Variables:
 
 - `LONG_MIN_EXPECTED_NET_RETURN` (fraction; default `0.002` = 0.2%)
-- `LONG_ROUND_TRIP_COST` (fraction; default `0.003` = 0.30%)
+- `LONG_ROUND_TRIP_COST` (fraction; default `0.002` = 0.20%)
 
 The same values are used by validation/backtesting and the daily signal gate. These are shared worker settings, not per-user preferences in the main app.
 
