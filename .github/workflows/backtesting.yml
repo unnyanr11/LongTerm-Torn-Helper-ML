@@ -1,6 +1,8 @@
 name: Long-term rolling-origin backtesting
 
 on:
+  schedule:
+    - cron: "17 */2 * * *"
   workflow_dispatch:
 
 permissions:
