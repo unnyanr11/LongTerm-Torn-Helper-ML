@@ -30,7 +30,7 @@ jobs:
         env:
           LONG_TERM_DATABASE_URL: ${{ secrets.LONG_TERM_DATABASE_URL }}
           LONG_MIN_EXPECTED_NET_RETURN: ${{ vars.LONG_MIN_EXPECTED_NET_RETURN || '0.002' }}
-          LONG_ROUND_TRIP_COST: ${{ vars.LONG_ROUND_TRIP_COST || '0.003' }}
+          LONG_ROUND_TRIP_COST: ${{ vars.LONG_ROUND_TRIP_COST || '0.002' }}
         run: python -m long_term.predict_daily
 
   # GitHub-hosted jobs have a six-hour maximum. Four chained 5h59m30s
