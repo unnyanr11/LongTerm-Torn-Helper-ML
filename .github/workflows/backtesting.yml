@@ -1,0 +1,31 @@
+name: Long-term rolling-origin backtesting
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: long-term-backtesting
+  cancel-in-progress: false
+
+jobs:
+  backtest:
+    if: github.repository == 'unnyanr11/LongTerm-Torn-Helper-ML' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+      - name: Backtest all stocks, windows and horizons
+        env:
+          LONG_TERM_DATABASE_URL: ${{ secrets.LONG_TERM_DATABASE_URL }}
+        run: python -m long_term.backtest
