@@ -39,6 +39,26 @@ pagination behavior, stock coverage, and rate limits. Record coverage per stock.
 A backfill must be resumable and idempotent. If the source only provides a
 shorter history for a stock, preserve that shorter coverage and report it.
 
+## Long-term prediction configuration
+
+The daily prediction worker evaluates 13 rolling historical windows independently:
+1, 2, 3, 6, and 9 months; 1 year; 1 year 6 months; 2 years; 2 years 6 months;
+3 years; 3 years 6 months; 4 years; and 5 years.
+
+For each eligible historical window it creates seven projections: 1 week,
+15 days, 1 month, 2 months, 3 months, 6 months, and 1 year. This is up to
+91 range/horizon combinations per stock (3,185 across 35 stocks). Windows
+with fewer than eight complete weekly observations are marked insufficient
+and do not receive fabricated forecasts.
+
+Calendar windows are approximated as day counts for filtering weekly records.
+Forecast target dates use the requested day horizon. Because the source data
+is weekly, 15-day and month-based outputs are model projections from weekly
+closes, not observed daily-price forecasts. Signals remain `wait` until
+horizon-specific out-of-sample validation and calibration are implemented.
+The current validation compares one-week walk-forward errors with a
+last-observed-close baseline; it is not proof of profitability.
+
 ## Planned stages
 
 1. Verify the upstream all-time/weekly endpoint and coverage for all 35 stocks.
@@ -61,5 +81,7 @@ calibration. Store the exact data cutoff and model version for every forecast.
 
 ## Local development
 
-Python requirements and runnable ingestion/backtest commands will be added
-after the upstream source and destination project configuration are verified.
+Install dependencies with `pip install -r requirements.txt`. Run the history
+importer with `python -m long_term.ingest_weekly --years 5` and the daily
+forecast worker with `python -m long_term.predict_daily`. Both require
+`LONG_TERM_DATABASE_URL` in the environment.
