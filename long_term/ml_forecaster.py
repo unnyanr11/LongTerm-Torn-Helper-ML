@@ -18,6 +18,10 @@ MIN_VALIDATION_ROWS = 3
 MIN_TEST_FOLDS = 3
 MAX_TEST_FOLDS = 8
 RANDOM_STATE = 42
+ROUND_TRIP_COST = 0.003  # 0.10% fee + 0.05% slippage on each side
+MIN_VALIDATION_TRADES = 3
+MAX_ACCEPTABLE_DRAWDOWN = 0.20
+MIN_ACCEPTABLE_PROFIT_FACTOR = 1.0
 
 
 def _features(prices, index):
@@ -112,10 +116,68 @@ def _score(actual_returns, predicted_returns):
     }
 
 
-def _select_model(X_train, y_train, X_valid, y_valid):
-    """Select by a strictly later chronological validation segment."""
+
+def _strategy_metrics(actual_log_returns, predicted_log_returns):
+    """Simulate non-overlapping long-only trades after round-trip costs."""
+    actual = np.asarray(actual_log_returns, dtype=float)
+    predicted = np.asarray(predicted_log_returns, dtype=float)
+    actual_simple = np.expm1(np.clip(actual, -20.0, 20.0))
+    predicted_simple = np.expm1(np.clip(predicted, -20.0, 20.0))
+    selected = predicted_simple > ROUND_TRIP_COST
+    trade_returns = actual_simple[selected] - ROUND_TRIP_COST
+    equity = 1.0
+    peak = 1.0
+    max_drawdown = 0.0
+    wins = []
+    losses = []
+    for net_return in trade_returns:
+        equity *= max(0.0, 1.0 + float(net_return))
+        peak = max(peak, equity)
+        max_drawdown = max(max_drawdown, 1.0 - equity / peak)
+        (wins if net_return > 0 else losses).append(float(net_return))
+    gross_wins = sum(wins)
+    gross_losses = abs(sum(losses))
+    profit_factor = (min(1000.0, gross_wins / gross_losses)
+                     if gross_losses > 0 else (1000.0 if gross_wins > 0 else 0.0))
+    total_return = equity - 1.0
+    trades = int(len(trade_returns))
+    eligible = (trades >= MIN_VALIDATION_TRADES
+                and total_return > 0
+                and profit_factor > MIN_ACCEPTABLE_PROFIT_FACTOR
+                and max_drawdown <= MAX_ACCEPTABLE_DRAWDOWN)
+    score = total_return / max(max_drawdown, 0.01) if trades else None
+    return {
+        "trades": trades,
+        "wins": int(np.sum(trade_returns > 0)),
+        "losses": int(np.sum(trade_returns < 0)),
+        "win_rate": float(np.mean(trade_returns > 0)) if trades else None,
+        "total_return": float(total_return),
+        "max_drawdown": float(-max_drawdown),
+        "profit_factor": float(profit_factor),
+        "risk_adjusted_score": float(score) if score is not None else None,
+        "round_trip_cost": ROUND_TRIP_COST,
+        "eligible": bool(eligible),
+    }
+
+
+def _non_overlapping_indices(origins, horizon_step):
+    """Keep validation/holdout decisions at least one forecast horizon apart."""
+    selected = []
+    last_origin = None
+    for index, origin in enumerate(np.asarray(origins, dtype=int)):
+        if last_origin is None or int(origin) - last_origin >= horizon_step:
+            selected.append(index)
+            last_origin = int(origin)
+    return np.asarray(selected, dtype=int)
+
+def _select_model(X_train, y_train, X_valid, y_valid, valid_origins, horizon_step):
+    """Select on chronological validation using net return, drawdown and prediction error."""
     if len(y_train) < MIN_SUPERVISED_ROWS or len(y_valid) < MIN_VALIDATION_ROWS:
         return None, {"status": "insufficient_validation"}
+    non_overlap = _non_overlapping_indices(valid_origins, horizon_step)
+    if len(non_overlap) < MIN_VALIDATION_TRADES:
+        return None, {"status": "insufficient_non_overlapping_validation_trades",
+                      "validation_trades_available": int(len(non_overlap))}
     results = {}
     for name in _models():
         model = _models()[name]
@@ -124,12 +186,26 @@ def _select_model(X_train, y_train, X_valid, y_valid):
             model.fit(X_train, y_train)
         pred = model.predict(X_valid)
         errors = np.abs(np.exp(y_valid) - np.exp(pred))
+        trading = _strategy_metrics(y_valid[non_overlap], pred[non_overlap])
         results[name] = {
             "validation_mae_price_ratio": float(np.mean(errors)),
             "validation_observations": int(len(errors)),
+            "validation_trading": trading,
         }
-    winner = min(results, key=lambda name: results[name]["validation_mae_price_ratio"])
-    return winner, {"status": "selected", "selected_model": winner, "candidates": results}
+    eligible = [name for name, result in results.items() if result["validation_trading"]["eligible"]]
+    if not eligible:
+        return None, {"status": "no_candidate_passed_risk_adjusted_validation",
+                      "candidates": results}
+    winner = min(eligible, key=lambda name: (
+        -results[name]["validation_trading"]["risk_adjusted_score"],
+        -results[name]["validation_trading"]["profit_factor"],
+        results[name]["validation_mae_price_ratio"]))
+    return winner, {"status": "selected_risk_adjusted", "selected_model": winner,
+                    "ranking_method": "eligible candidates ranked by net return / max(drawdown, 1%), then profit factor, then validation MAE",
+                    "minimum_validation_trades": MIN_VALIDATION_TRADES,
+                    "maximum_drawdown_pct": MAX_ACCEPTABLE_DRAWDOWN * 100,
+                    "minimum_profit_factor": MIN_ACCEPTABLE_PROFIT_FACTOR,
+                    "candidates": results}
 
 def evaluate_ml_horizon(prices, horizon_days):
     """Select on an earlier chronological segment; report only later holdout folds."""
@@ -154,6 +230,7 @@ def evaluate_ml_horizon(prices, horizon_days):
     test_mask = origins > validation_cut
     X_train, y_train = X[train_mask], y[train_mask]
     X_valid, y_valid = X[validation_mask], y[validation_mask]
+    validation_origins = origins[validation_mask]
     if len(y_train) < MIN_SUPERVISED_ROWS or len(y_valid) < MIN_VALIDATION_ROWS:
         return {
             "status": "insufficient_ml_history",
@@ -164,7 +241,8 @@ def evaluate_ml_horizon(prices, horizon_days):
             "required_validation_rows": MIN_VALIDATION_ROWS,
         }
 
-    winner, selection = _select_model(X_train, y_train, X_valid, y_valid)
+    winner, selection = _select_model(X_train, y_train, X_valid, y_valid,
+                                      validation_origins, step)
     if winner is None:
         return {"status": selection["status"], "horizon_days": int(horizon_days), **selection}
 
@@ -205,6 +283,7 @@ def evaluate_ml_horizon(prices, horizon_days):
 
     # Evaluate returns against a zero-return (last-price) baseline.
     metrics = _score(model_actual, model_pred)
+    holdout_non_overlap = _strategy_metrics(model_actual, model_pred)
     final_train_idx = np.flatnonzero(target_indices <= len(values) - 1)
     latest_model = _models()[winner]
     with warnings.catch_warnings():
@@ -213,7 +292,8 @@ def evaluate_ml_horizon(prices, horizon_days):
     latest_features = _features(values, len(values) - 1).reshape(1, -1)
     latest_log_return = float(latest_model.predict(latest_features)[0])
     forecast_price = float(values[-1] * np.exp(np.clip(latest_log_return, -2.0, 2.0)))
-    status = "validated" if metrics["mae_improvement_vs_flat_price"] >= 0.05 else "rejected"
+    status = ("validated" if metrics["mae_improvement_vs_flat_price"] >= 0.05
+              and holdout_non_overlap["eligible"] else "rejected")
     return {
         "status": status,
         "horizon_days": int(horizon_days),
@@ -224,6 +304,7 @@ def evaluate_ml_horizon(prices, horizon_days):
         "validation_rows": int(len(X_valid)),
         "holdout_folds": int(len(model_actual)),
         "holdout": metrics,
+        "holdout_trading": holdout_non_overlap,
         "latest_predicted_log_return": latest_log_return,
         "latest_predicted_price": forecast_price,
         "latest_origin_price": float(values[-1]),
