@@ -74,6 +74,15 @@ Each eligible window is evaluated against seven requested horizons: 7, 15, 30, 6
 
 A window needs at least 26 complete weekly observations before the prediction worker considers it. The feature engine also requires sufficient lag/rolling history and supervised examples. Combinations that cannot support chronological validation and at least three non-overlapping holdout folds do not receive fabricated predictions. Five years of weekly history cannot necessarily support multiple independent one-year holdout folds after feature warm-up and horizon purging.
 
+## Trading thresholds and costs
+
+The long-term default minimum expected net return is **0.2%** after the estimated round-trip cost. The default round-trip cost is 0.30% (0.10% fee plus 0.05% slippage on each side), so the default gross forecast hurdle is 0.50%. There is no maximum expected-profit threshold. Configure the worker/backtest defaults with GitHub Actions repository Variables:
+
+- `LONG_MIN_EXPECTED_NET_RETURN` (fraction; default `0.002` = 0.2%)
+- `LONG_ROUND_TRIP_COST` (fraction; default `0.003` = 0.30%)
+
+The same values are used by validation/backtesting and the daily signal gate. These are shared worker settings, not per-user preferences in the main app.
+
 ## Multi-model forecasting engine
 
 The daily worker uses the feature-based model competition in `long_term/ml_forecaster.py`. Candidate estimators are Ridge regression, Random Forest, Extra Trees and Histogram Gradient Boosting. Features are calculated only from weekly observations available at the forecast origin: lagged log returns (1, 2, 3, 4, 8, 13 and 26 weeks), rolling return statistics, recent trend slope and distance from rolling price means.
