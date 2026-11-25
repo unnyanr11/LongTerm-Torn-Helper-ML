@@ -3,12 +3,12 @@ import json
 from datetime import timedelta
 
 from .db import connect
-from .evaluation import evaluate_horizon, MIN_BACKTEST_TRAIN_WEEKS
+from .ml_forecaster import evaluate_ml_horizon, MIN_FEATURE_HISTORY
 from .predict_daily import ANALYSIS_RANGES, FORECAST_HORIZONS
 from .stock_universe import STOCKS
 
-MODEL_NAME = "weekly_log_linear_walk_forward"
-MODEL_VERSION = "1.0.0"
+MODEL_NAME = "multi_model_ml_walk_forward"
+MODEL_VERSION = "2.0.0"
 
 
 def run():
@@ -27,7 +27,7 @@ def run():
                     (stock_id,),
                 )
                 rows = cur.fetchall()
-                if len(rows) < MIN_BACKTEST_TRAIN_WEEKS + 3:
+                if len(rows) < MIN_FEATURE_HISTORY + 25:
                     print(f"{symbol}: insufficient weekly history ({len(rows)})")
                     skipped += 1
                     continue
@@ -39,7 +39,7 @@ def run():
                     selected = [price for week, price in rows if week >= range_start and week <= origin]
                     range_result = {"analysis_range_days": range_days, "observations": len(selected), "horizons": {}}
                     for horizon_name, horizon_days in FORECAST_HORIZONS:
-                        evaluation = evaluate_horizon(selected, horizon_days)
+                        evaluation = evaluate_ml_horizon(selected, horizon_days)
                         range_result["horizons"][horizon_name] = evaluation
                         any_validated = any_validated or evaluation.get("status") == "validated"
                     results[range_name] = range_result
@@ -48,10 +48,11 @@ def run():
                 metrics = {
                     "kind": "rolling_origin_backtest",
                     "data_through": origin.isoformat(),
-                    "method": "expanding training window; six-month minimum training; non-overlapping target folds",
-                    "baseline": "last observed close carried forward",
-                    "promotion_rule": "at least 5% MAE improvement over baseline with at least 3 folds",
+                    "method": "feature-based model competition; chronological validation; non-overlapping untouched holdout folds",
+                    "baseline": "zero log-return / last observed close carried forward",
+                    "promotion_rule": "at least 5% holdout MAE improvement over baseline with at least 3 non-overlapping folds",
                     "weekly_horizon_mapping": "ceil(requested_days / 7); targets are observed weekly closes",
+                    "candidate_models": ["ridge", "random_forest", "extra_trees", "hist_gradient_boosting"],
                     "any_pair_validated": any_validated,
                     "analysis_ranges": results,
                 }
