@@ -91,6 +91,33 @@ For each stock/lookback/horizon:
 
 A combination is marked `validated` only when holdout MAE improves on the baseline by at least 5%, at least three non-overlapping holdout folds are available, and the holdout trading simulation also has at least three trades, positive net compounded return, profit factor above 1.0 and maximum drawdown no greater than 20%. If no candidate passes the validation risk filters, no model is selected for that horizon. Otherwise it may be rejected or insufficient. A generated predicted price is not, by itself, evidence that a configuration passed validation. The current prediction worker stores the signal as `wait`; this pipeline does not issue Buy/Sell recommendations.
 
+## Automatic matured-outcome calibration
+
+The daily prediction worker also calibrates forecasts automatically, separately
+for each stock, analysis lookback and forecast horizon. It joins forecasts to
+their completed target-week close; incomplete weeks and forecasts whose target
+has not matured are never used. Calibration fits an affine correction to the
+predicted log return (scale and bias) on the older 70% of matured observations,
+then evaluates it on the later chronological holdout.
+
+A candidate needs at least 20 matured observations (at least 14 for fitting and
+6 for holdout), must stay within conservative parameter bounds (scale 0.50–1.50
+and absolute bias at most 0.10 log-return units), and must improve holdout MAE
+by at least 2% versus the uncalibrated forecast. Only then is it activated.
+The prior active version is retained if a candidate fails. A candidate is not
+re-evaluated into a new version until additional matured outcomes arrive.
+Calibration versions and acceptance metrics are stored in
+`long_term.forecast_calibrations`; each forecast's validation JSON records the
+active calibration and the latest candidate result. This is automatic; routine
+calibration does not require an admin approval.
+
+**One-time database setup:** run
+[`migrations/20261126_forecast_calibrations.sql`](migrations/20261126_forecast_calibrations.sql)
+against the dedicated long-term Supabase database before the next prediction
+workflow run. It creates only the calibration history table and indexes; it
+does not modify existing RLS policies or grants. Keep the schema private and
+grant access only through the existing server-side database connection.
+
 ## Prediction and backtest workflows
 
 `.github/workflows/daily-predictions.yml` is started manually and then maintains an approximately daily cycle using four chained waits of 5 hours 59 minutes 30 seconds before dispatching the next run. GitHub's six-hour job limit, queueing and dispatch latency make this best-effort rather than an exact 24-hour schedule. Each cycle runs the Python unit tests and generates forecasts that are due (a stock is normally eligible for a new model run every 24 hours). Start it from the Actions tab on `main` after configuring the secret.
