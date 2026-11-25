@@ -11,11 +11,12 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 
 from .db import connect
-from .evaluation import evaluate_horizon, horizon_weeks
+from .evaluation import horizon_weeks
+from .ml_forecaster import evaluate_ml_horizon
 from .stock_universe import STOCKS
 
-MODEL_NAME = "multi_window_log_linear"
-MODEL_VERSION = "3.0.0"
+MODEL_NAME = "multi_model_ml_forecast"
+MODEL_VERSION = "4.0.0"
 DUE_HOURS = 24
 MIN_TRAIN_POINTS = 26
 MIN_VALIDATION_POINTS = 3
@@ -120,11 +121,10 @@ def run():
                         result["status"] = "research"
 
                         for horizon_name, horizon_days in FORECAST_HORIZONS:
-                            try:
-                                predicted = _fit_predict(prices, horizon_days)
-                            except (ValueError, OverflowError):
+                            horizon_validation = evaluate_ml_horizon(prices, horizon_days)
+                            predicted = horizon_validation.get("latest_predicted_price")
+                            if predicted is None:
                                 continue
-                            horizon_validation = evaluate_horizon(prices, horizon_days)
                             predicted_return = (predicted / origin_price - 1.0) * 100.0
                             effective_days = horizon_weeks(horizon_days) * 7
                             target_date = origin_week + timedelta(days=effective_days)
@@ -136,6 +136,8 @@ def run():
                                 "requested_horizon_days": horizon_days,
                                 "effective_weekly_horizon_days": effective_days,
                                 "horizon_validation": horizon_validation,
+                                "selected_model": horizon_validation.get("selected_model"),
+                                "holdout_metrics": horizon_validation.get("holdout"),
                                 "observations": len(prices),
                                 "data_through": origin_week.isoformat(),
                                 "note": "Projection from weekly closes; target aligns to an observed weekly interval.",
@@ -159,6 +161,8 @@ def run():
                         name: days for name, days in FORECAST_HORIZONS
                     },
                     "minimum_training_observations": MIN_TRAIN_POINTS,
+                    "model_candidates": ["ridge", "random_forest", "extra_trees", "hist_gradient_boosting"],
+                    "model_selection": "chronological validation followed by non-overlapping holdout evaluation",
                     "validation_rule": "horizon-specific non-overlapping walk-forward MAE must beat last-close baseline by at least 5%, with at least 3 folds",
                     "weekly_horizon_mapping": "ceil(requested_days / 7) weekly observations",
                 }
