@@ -1,6 +1,10 @@
 name: Long-term rolling-origin backtesting
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backtesting.yml'
   workflow_dispatch:
 
 permissions:
