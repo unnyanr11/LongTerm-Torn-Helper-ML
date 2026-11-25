@@ -11,13 +11,14 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 
 from .db import connect
+from .evaluation import evaluate_horizon, horizon_weeks
 from .stock_universe import STOCKS
 
 MODEL_NAME = "multi_window_log_linear"
-MODEL_VERSION = "2.0.0"
+MODEL_VERSION = "3.0.0"
 DUE_HOURS = 24
-MIN_TRAIN_POINTS = 8
-MIN_VALIDATION_POINTS = 4
+MIN_TRAIN_POINTS = 26
+MIN_VALIDATION_POINTS = 3
 
 # Approximate calendar-month lengths in days; weekly data remains the source.
 ANALYSIS_RANGES = (
@@ -56,41 +57,6 @@ def _fit_predict(prices, horizon_days):
     weeks_forward = horizon_days / 7.0
     prediction = math.exp(intercept + slope * (len(values) - 1 + weeks_forward))
     return max(prediction, 0.000001)
-
-
-def _validate(prices):
-    """Walk-forward one-week validation, never training on the target week."""
-    errors_model, errors_naive = [], []
-    first_target = max(MIN_TRAIN_POINTS, int(len(prices) * 0.70))
-    for target_idx in range(first_target, len(prices)):
-        history = prices[:target_idx]
-        actual = float(prices[target_idx])
-        if len(history) < MIN_TRAIN_POINTS or actual <= 0:
-            continue
-        try:
-            predicted = _fit_predict(history, 7)
-        except (ValueError, OverflowError):
-            continue
-        errors_model.append(abs(predicted - actual))
-        errors_naive.append(abs(float(history[-1]) - actual))
-
-    if len(errors_model) < MIN_VALIDATION_POINTS:
-        return {
-            "status": "insufficient_validation",
-            "validation_observations": len(errors_model),
-        }
-
-    model_mae = float(np.mean(errors_model))
-    naive_mae = float(np.mean(errors_naive))
-    improvement = (naive_mae - model_mae) / naive_mae if naive_mae > 0 else 0.0
-    return {
-        "status": "validated" if improvement >= 0.05 else "rejected",
-        "validation_observations": len(errors_model),
-        "model_mae": model_mae,
-        "naive_mae": naive_mae,
-        "improvement_vs_naive": improvement,
-        "minimum_required_improvement": 0.05,
-    }
 
 
 def _range_rows(rows, cutoff, days):
@@ -138,7 +104,6 @@ def run():
                 origin_week = rows[-1][0]
                 origin_price = float(rows[-1][1])
                 range_results = {}
-                run_validated = False
 
                 for range_name, range_days in ANALYSIS_RANGES:
                     selected = _range_rows(rows, origin_week, range_days)
@@ -152,32 +117,28 @@ def run():
                     }
 
                     if len(prices) >= MIN_TRAIN_POINTS:
-                        validation = _validate(prices)
-                        result["validation"] = validation
-                        validated = validation.get("status") == "validated"
-                        run_validated = run_validated or validated
-                        result["status"] = validation.get("status", "rejected")
+                        result["status"] = "research"
 
                         for horizon_name, horizon_days in FORECAST_HORIZONS:
                             try:
                                 predicted = _fit_predict(prices, horizon_days)
                             except (ValueError, OverflowError):
                                 continue
+                            horizon_validation = evaluate_horizon(prices, horizon_days)
                             predicted_return = (predicted / origin_price - 1.0) * 100.0
-                            target_date = origin_week + timedelta(days=horizon_days)
-                            # Signals remain conservative until horizon-specific
-                            # out-of-sample validation and calibration are added.
+                            effective_days = horizon_weeks(horizon_days) * 7
+                            target_date = origin_week + timedelta(days=effective_days)
                             signal = "wait"
                             forecast_validation = {
                                 "analysis_range": range_name,
                                 "analysis_range_days": range_days,
                                 "forecast_horizon": horizon_name,
-                                "forecast_horizon_days": horizon_days,
-                                "model_validated_one_week_baseline": validated,
-                                "range_validation": validation,
+                                "requested_horizon_days": horizon_days,
+                                "effective_weekly_horizon_days": effective_days,
+                                "horizon_validation": horizon_validation,
                                 "observations": len(prices),
                                 "data_through": origin_week.isoformat(),
-                                "note": "Weekly-close trend projection; not daily observed data.",
+                                "note": "Projection from weekly closes; target aligns to an observed weekly interval.",
                             }
                             result.setdefault("forecasts", []).append(horizon_name)
                             pending_forecasts = result.setdefault("_pending", [])
@@ -188,7 +149,7 @@ def run():
                             ))
                     range_results[range_name] = result
 
-                overall_status = "validated" if run_validated else "rejected"
+                overall_status = "research"
                 all_metrics = {
                     "analysis_ranges": {
                         name: {k: v for k, v in result.items() if k != "_pending"}
@@ -198,7 +159,8 @@ def run():
                         name: days for name, days in FORECAST_HORIZONS
                     },
                     "minimum_training_observations": MIN_TRAIN_POINTS,
-                    "validation_rule": "one-week walk-forward MAE must beat last-close baseline by at least 5%",
+                    "validation_rule": "horizon-specific non-overlapping walk-forward MAE must beat last-close baseline by at least 5%, with at least 3 folds",
+                    "weekly_horizon_mapping": "ceil(requested_days / 7) weekly observations",
                 }
 
                 cur.execute(
