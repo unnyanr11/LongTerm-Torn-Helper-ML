@@ -68,6 +68,16 @@ def calibrate_matured_forecasts(cur, stock_id, analysis_range_days, horizon_days
     for _origin_week, origin_price, predicted_price, actual_price in rows:
         predicted.append(math.log(float(predicted_price) / float(origin_price)))
         actual.append(math.log(float(actual_price) / float(origin_price)))
+    cur.execute(
+        """select sample_count from long_term.forecast_calibrations
+           where stock_id=%s and analysis_range_days=%s and horizon_days=%s
+             and status='active' order by version desc limit 1""",
+        (stock_id, analysis_range_days, horizon_days),
+    )
+    active_row = cur.fetchone()
+    if active_row and len(rows) <= int(active_row[0]):
+        return {"status": "no_new_matured_data", "samples": len(rows)}
+
     candidate = fit_calibration(predicted, actual)
     if candidate["status"] != "accepted":
         return candidate
