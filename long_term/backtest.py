@@ -1,6 +1,6 @@
 """Run per-stock, per-lookback, per-horizon rolling-origin backtests."""
 import json
-from datetime import timedelta, timezone, datetime
+from datetime import timedelta
 
 from .db import connect
 from .evaluation import evaluate_horizon, MIN_BACKTEST_TRAIN_WEEKS
@@ -31,7 +31,6 @@ def run():
                     print(f"{symbol}: insufficient weekly history ({len(rows)})")
                     skipped += 1
                     continue
-                all_prices = [float(r[1]) for r in rows]
                 origin = rows[-1][0]
                 results = {}
                 any_validated = False
@@ -45,7 +44,7 @@ def run():
                         any_validated = any_validated or evaluation.get("status") == "validated"
                     results[range_name] = range_result
 
-                status = "validated" if any_validated else "rejected"
+                status = "research"
                 metrics = {
                     "kind": "rolling_origin_backtest",
                     "data_through": origin.isoformat(),
@@ -53,6 +52,7 @@ def run():
                     "baseline": "last observed close carried forward",
                     "promotion_rule": "at least 5% MAE improvement over baseline with at least 3 folds",
                     "weekly_horizon_mapping": "ceil(requested_days / 7); targets are observed weekly closes",
+                    "any_pair_validated": any_validated,
                     "analysis_ranges": results,
                 }
                 cur.execute(
