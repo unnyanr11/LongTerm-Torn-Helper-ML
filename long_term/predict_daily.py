@@ -54,7 +54,7 @@ def _fit_predict(prices, horizon_days):
         raise ValueError("Insufficient or invalid prices for trend fit")
     x = np.arange(len(values), dtype=float)
     slope, intercept = np.polyfit(x, np.log(values), 1)
-    weeks_forward = horizon_days / 7.0
+    weeks_forward = horizon_weeks(horizon_days)
     prediction = math.exp(intercept + slope * (len(values) - 1 + weeks_forward))
     return max(prediction, 0.000001)
 
