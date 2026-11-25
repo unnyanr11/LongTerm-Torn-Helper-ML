@@ -8,7 +8,7 @@ from .predict_daily import ANALYSIS_RANGES, FORECAST_HORIZONS
 from .stock_universe import STOCKS
 
 MODEL_NAME = "multi_model_ml_walk_forward"
-MODEL_VERSION = "2.0.0"
+MODEL_VERSION = "3.0.0"
 
 
 def run():
