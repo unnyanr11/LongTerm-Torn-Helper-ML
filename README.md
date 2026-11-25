@@ -82,12 +82,14 @@ For each stock/lookback/horizon:
 
 1. Construct supervised samples using the requested weekly-aligned future log return.
 2. Keep samples chronological; do not shuffle time-series rows.
-3. Select the candidate on a later validation segment.
-4. Refit the selected candidate at non-overlapping holdout origins using only labels already known at each origin.
-5. Compare holdout price-ratio MAE against a zero-return / last-close baseline.
-6. Save the selected model, validation and holdout metrics, fold count and data cutoff with the forecast.
+3. Evaluate candidates on a strictly later validation segment. Validation trade decisions are spaced at least one full forecast horizon apart, so overlapping positions are not counted as separate trades.
+4. Simulate long-only entries only when predicted return exceeds estimated round-trip costs (0.10% fee plus 0.05% slippage on each side; 0.30% total).
+5. Reject candidates with fewer than three validation trades, non-positive compounded net return, profit factor at or below 1.0, or maximum drawdown above 20%.
+6. Rank the remaining candidates by compounded net return divided by the larger of absolute maximum drawdown or 1%, then by profit factor and validation MAE.
+7. Refit the selected candidate at non-overlapping holdout origins using only labels already known at each origin; record holdout prediction and trading metrics.
+8. Save the selected model, validation and holdout metrics, fold count and data cutoff with the forecast.
 
-A combination is marked `validated` only when holdout MAE improves on the baseline by at least 5% and at least three non-overlapping holdout folds are available. Otherwise it may be rejected or insufficient. A generated predicted price is not, by itself, evidence that a configuration passed validation. The current prediction worker stores the signal as `wait`; this pipeline does not issue Buy/Sell recommendations.
+A combination is marked `validated` only when holdout MAE improves on the baseline by at least 5%, at least three non-overlapping holdout folds are available, and the holdout trading simulation also has at least three trades, positive net compounded return, profit factor above 1.0 and maximum drawdown no greater than 20%. If no candidate passes the validation risk filters, no model is selected for that horizon. Otherwise it may be rejected or insufficient. A generated predicted price is not, by itself, evidence that a configuration passed validation. The current prediction worker stores the signal as `wait`; this pipeline does not issue Buy/Sell recommendations.
 
 ## Prediction and backtest workflows
 
