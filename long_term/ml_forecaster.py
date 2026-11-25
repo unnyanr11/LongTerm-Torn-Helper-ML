@@ -22,7 +22,8 @@ RANDOM_STATE = 42
 ROUND_TRIP_COST = float(os.getenv('LONG_ROUND_TRIP_COST', '0.003'))
 MIN_EXPECTED_NET_RETURN = float(os.getenv('LONG_MIN_EXPECTED_NET_RETURN', '0.002'))
 MIN_PREDICTED_GROSS_RETURN = ROUND_TRIP_COST + MIN_EXPECTED_NET_RETURN
-if ROUND_TRIP_COST < 0 or MIN_EXPECTED_NET_RETURN < 0:
+if (not math.isfinite(ROUND_TRIP_COST) or not math.isfinite(MIN_EXPECTED_NET_RETURN)
+        or ROUND_TRIP_COST < 0 or MIN_EXPECTED_NET_RETURN < 0):
     raise ValueError('Long-term trading cost and minimum net return must be non-negative')
 MIN_VALIDATION_TRADES = 3
 MAX_ACCEPTABLE_DRAWDOWN = 0.20
@@ -128,8 +129,9 @@ def _strategy_metrics(actual_log_returns, predicted_log_returns, *, round_trip_c
     predicted = np.asarray(predicted_log_returns, dtype=float)
     actual_simple = np.expm1(np.clip(actual, -20.0, 20.0))
     predicted_simple = np.expm1(np.clip(predicted, -20.0, 20.0))
-    if round_trip_cost < 0 or minimum_net_return < 0:
-        raise ValueError('Trading cost and minimum net return must be non-negative')
+    if (not math.isfinite(round_trip_cost) or not math.isfinite(minimum_net_return)
+            or round_trip_cost < 0 or minimum_net_return < 0):
+        raise ValueError('Trading cost and minimum net return must be finite and non-negative')
     required_gross = round_trip_cost + minimum_net_return
     selected = predicted_simple >= required_gross
     trade_returns = actual_simple[selected] - round_trip_cost
