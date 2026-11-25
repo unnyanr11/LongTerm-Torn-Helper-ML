@@ -15,7 +15,7 @@ from long_term.ml_forecaster import (
 class MultiModelForecastTests(unittest.TestCase):
     def test_long_term_defaults_are_point_two_percent_net(self):
         self.assertAlmostEqual(MIN_EXPECTED_NET_RETURN, 0.002)
-        self.assertAlmostEqual(ROUND_TRIP_COST, 0.003)
+        self.assertAlmostEqual(ROUND_TRIP_COST, 0.002)
 
     def test_strategy_threshold_is_configurable_and_costs_are_deducted(self):
         result = _strategy_metrics(
