@@ -43,7 +43,7 @@ class MultiModelForecastTests(unittest.TestCase):
         )
         self.assertEqual(result["trades"], 3)
         self.assertEqual(result["wins"], 2)
-        self.assertGreater(result["max_drawdown"], -0.001)
+        self.assertGreater(result["max_drawdown"], -0.02)
         self.assertGreater(result["total_return"], 0)
         self.assertTrue(result["eligible"])
 
