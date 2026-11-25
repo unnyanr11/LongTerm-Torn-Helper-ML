@@ -11,12 +11,14 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 
 from .db import connect
+from .calibration import (apply_calibration, calibrate_matured_forecasts,
+                          get_active_calibration)
 from .evaluation import horizon_weeks
 from .ml_forecaster import evaluate_ml_horizon
 from .stock_universe import STOCKS
 
 MODEL_NAME = "multi_model_ml_forecast"
-MODEL_VERSION = "5.0.0"
+MODEL_VERSION = "5.1.0"
 DUE_HOURS = 24
 MIN_TRAIN_POINTS = 26
 MIN_VALIDATION_POINTS = 3
@@ -125,6 +127,19 @@ def run():
                             predicted = horizon_validation.get("latest_predicted_price")
                             if predicted is None:
                                 continue
+
+                            # Matured forecast outcomes are recalibrated automatically.
+                            # A candidate is promoted only after a chronological holdout win.
+                            calibration_candidate = calibrate_matured_forecasts(
+                                cur, stock_id, range_days, horizon_days
+                            )
+                            active_calibration = get_active_calibration(
+                                cur, stock_id, range_days, horizon_days
+                            )
+                            raw_predicted = float(predicted)
+                            predicted = apply_calibration(
+                                raw_predicted, origin_price, active_calibration
+                            )
                             predicted_return = (predicted / origin_price - 1.0) * 100.0
                             effective_days = horizon_weeks(horizon_days) * 7
                             target_date = origin_week + timedelta(days=effective_days)
@@ -138,6 +153,11 @@ def run():
                                 "horizon_validation": horizon_validation,
                                 "selected_model": horizon_validation.get("selected_model"),
                                 "holdout_metrics": horizon_validation.get("holdout"),
+                                "calibration": {
+                                    "active": active_calibration,
+                                    "candidate": calibration_candidate,
+                                    "raw_predicted_price": raw_predicted,
+                                },
                                 "observations": len(prices),
                                 "data_through": origin_week.isoformat(),
                                 "note": "Projection from weekly closes; target aligns to an observed weekly interval.",
