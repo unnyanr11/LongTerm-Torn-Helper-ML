@@ -113,38 +113,24 @@ def _score(actual_returns, predicted_returns):
     }
 
 
-def _select_model(X, y):
-    """Chronological expanding-window selection; no random shuffling."""
-    if len(y) < MIN_SUPERVISED_ROWS:
-        return None, {"status": "insufficient_training_rows", "training_rows": int(len(y))}
-    splits = min(3, max(2, len(y) // 8))
-    if len(y) < splits + 8:
-        return None, {"status": "insufficient_training_rows", "training_rows": int(len(y))}
-    splitter = TimeSeriesSplit(n_splits=splits)
+def _select_model(X_train, y_train, X_valid, y_valid):
+    """Select by a strictly later chronological validation segment."""
+    if len(y_train) < MIN_SUPERVISED_ROWS or len(y_valid) < MIN_VALIDATION_ROWS:
+        return None, {"status": "insufficient_validation"}
     results = {}
-    for name, factory in _models().items():
-        fold_errors = []
-        for train_idx, valid_idx in splitter.split(X):
-            if len(train_idx) < 8:
-                continue
-            model = factory
-            # Fresh estimator for each fold.
-            model = _models()[name]
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", ConvergenceWarning)
-                model.fit(X[train_idx], y[train_idx])
-            pred = model.predict(X[valid_idx])
-            fold_errors.extend(np.abs(np.exp(y[valid_idx]) - np.exp(pred)).tolist())
-        if fold_errors:
-            results[name] = {
-                "validation_mae_price_ratio": float(np.mean(fold_errors)),
-                "validation_folds": int(len(fold_errors)),
-            }
-    if not results:
-        return None, {"status": "insufficient_validation", "candidates": results}
+    for name in _models():
+        model = _models()[name]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", ConvergenceWarning)
+            model.fit(X_train, y_train)
+        pred = model.predict(X_valid)
+        errors = np.abs(np.exp(y_valid) - np.exp(pred))
+        results[name] = {
+            "validation_mae_price_ratio": float(np.mean(errors)),
+            "validation_observations": int(len(errors)),
+        }
     winner = min(results, key=lambda name: results[name]["validation_mae_price_ratio"])
     return winner, {"status": "selected", "selected_model": winner, "candidates": results}
-
 
 def evaluate_ml_horizon(prices, horizon_days):
     """Select on an earlier chronological segment; report only later holdout folds."""
@@ -158,12 +144,15 @@ def evaluate_ml_horizon(prices, horizon_days):
             "minimum_supervised_rows": MIN_SUPERVISED_ROWS + MIN_VALIDATION_ROWS + MIN_TEST_FOLDS,
         }
 
-    # The split is based on chronological origin indices, not shuffled rows.
-    selection_cut = int(len(values) * 0.65)
-    test_cut = int(len(values) * 0.80)
-    train_mask = target_indices <= selection_cut
-    validation_mask = (origins > selection_cut) & (target_indices <= test_cut)
-    test_mask = origins > test_cut
+    # Reserve an earlier training period, one horizon-sized validation period,
+    # and a later untouched test period. Long horizons may correctly be untestable
+    # with only five years of weekly history.
+    step = max(1, math.ceil(horizon_days / 7))
+    train_cut = max(int(len(values) * 0.40), MIN_FEATURE_HISTORY + MIN_SUPERVISED_ROWS + step)
+    validation_cut = train_cut + (2 * step)
+    train_mask = target_indices <= train_cut
+    validation_mask = (origins > train_cut) & (target_indices <= validation_cut)
+    test_mask = origins > validation_cut
     X_train, y_train = X[train_mask], y[train_mask]
     X_valid, y_valid = X[validation_mask], y[validation_mask]
     if len(y_train) < MIN_SUPERVISED_ROWS or len(y_valid) < MIN_VALIDATION_ROWS:
@@ -172,19 +161,20 @@ def evaluate_ml_horizon(prices, horizon_days):
             "horizon_days": int(horizon_days),
             "training_rows": int(len(y_train)),
             "validation_rows": int(len(y_valid)),
+            "required_training_rows": MIN_SUPERVISED_ROWS,
+            "required_validation_rows": MIN_VALIDATION_ROWS,
         }
 
-    winner, selection = _select_model(X_train, y_train)
+    winner, selection = _select_model(X_train, y_train, X_valid, y_valid)
     if winner is None:
         return {"status": selection["status"], "horizon_days": int(horizon_days), **selection}
 
-    # A final untouched chronological holdout. Refit the selected model at each origin
-    # using only samples whose target was already observable at that origin.
-    test_origins = origins[test_mask]
+    # Non-overlapping test origins; every training target is known by its origin.
+    test_origins = np.unique(origins[test_mask])[::step]
     if len(test_origins) > MAX_TEST_FOLDS:
         positions = np.linspace(0, len(test_origins) - 1, MAX_TEST_FOLDS, dtype=int)
         test_origins = test_origins[positions]
-    model_actual, model_pred, baseline_actual, fold_detail = [], [], [], []
+    model_actual, model_pred, fold_detail = [], [], []
     for origin in test_origins:
         train_idx = np.flatnonzero(target_indices <= origin)
         test_idx = np.flatnonzero(origins == origin)
@@ -198,7 +188,6 @@ def evaluate_ml_horizon(prices, horizon_days):
         actual = float(y[test_idx[0]])
         model_pred.append(prediction)
         model_actual.append(actual)
-        baseline_actual.append(actual)
         fold_detail.append({
             "origin_index": int(origin),
             "target_index": int(target_indices[test_idx[0]]),
