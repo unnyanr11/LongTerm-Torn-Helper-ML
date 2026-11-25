@@ -26,7 +26,7 @@ class MultiModelForecastTests(unittest.TestCase):
         self.assertTrue(np.allclose(y, np.log(1.01) * 3))
 
     def test_ml_forecaster_selects_and_tests_models_chronologically(self):
-        prices = [100.0 * (1.005 ** i) for i in range(261)]
+        prices = [100.0 * (1.01 ** i) for i in range(261)]
         result = evaluate_ml_horizon(prices, 7)
         self.assertEqual(result["status"], "validated")
         self.assertIn(result["selected_model"], {
