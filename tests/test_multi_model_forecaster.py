@@ -59,7 +59,9 @@ class MultiModelForecastTests(unittest.TestCase):
         prices = [100.0 * (1.002 ** i) for i in range(261)]
         result = evaluate_ml_horizon(prices, 365)
         self.assertIn(result["status"], {
-            "insufficient_ml_history", "insufficient_holdout_folds"
+            "insufficient_ml_history",
+            "insufficient_holdout_folds",
+            "insufficient_non_overlapping_validation_trades",
         })
 
 
