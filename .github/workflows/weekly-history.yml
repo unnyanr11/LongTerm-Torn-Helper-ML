@@ -1,10 +1,6 @@
 name: Long-term weekly stock history
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/weekly-history.yml'
   workflow_dispatch:
     inputs:
       years:
