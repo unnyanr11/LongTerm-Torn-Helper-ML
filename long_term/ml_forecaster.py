@@ -19,6 +19,8 @@ MIN_TEST_FOLDS = 3
 MAX_TEST_FOLDS = 8
 RANDOM_STATE = 42
 ROUND_TRIP_COST = 0.003  # 0.10% fee + 0.05% slippage on each side
+MIN_EXPECTED_NET_RETURN = 0.002  # Align with the website's 0.2% long-term default
+MIN_PREDICTED_GROSS_RETURN = ROUND_TRIP_COST + MIN_EXPECTED_NET_RETURN
 MIN_VALIDATION_TRADES = 3
 MAX_ACCEPTABLE_DRAWDOWN = 0.20
 MIN_ACCEPTABLE_PROFIT_FACTOR = 1.0
@@ -123,7 +125,7 @@ def _strategy_metrics(actual_log_returns, predicted_log_returns):
     predicted = np.asarray(predicted_log_returns, dtype=float)
     actual_simple = np.expm1(np.clip(actual, -20.0, 20.0))
     predicted_simple = np.expm1(np.clip(predicted, -20.0, 20.0))
-    selected = predicted_simple > ROUND_TRIP_COST
+    selected = predicted_simple >= MIN_PREDICTED_GROSS_RETURN
     trade_returns = actual_simple[selected] - ROUND_TRIP_COST
     equity = 1.0
     peak = 1.0
@@ -156,6 +158,8 @@ def _strategy_metrics(actual_log_returns, predicted_log_returns):
         "profit_factor": float(profit_factor),
         "risk_adjusted_score": float(score) if score is not None else None,
         "round_trip_cost": ROUND_TRIP_COST,
+        "minimum_expected_net_return": MIN_EXPECTED_NET_RETURN,
+        "minimum_predicted_gross_return": MIN_PREDICTED_GROSS_RETURN,
         "eligible": bool(eligible),
     }
 
