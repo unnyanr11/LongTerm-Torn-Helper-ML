@@ -81,9 +81,14 @@ create table if not exists long_term.forecasts (
   predicted_return_pct double precision not null,
   signal text not null check (signal in ('buy','sell','watch','wait')),
   validation jsonb not null default '{}'::jsonb,
-  unique (stock_id, model_run_id, origin_week, target_week),
+  analysis_range_days integer not null check (analysis_range_days > 0),
+  horizon_days integer not null check (horizon_days > 0),
+  unique (stock_id, model_run_id, analysis_range_days, horizon_days),
   check (target_week > origin_week)
 );
+
+create index if not exists forecasts_stock_target_idx
+  on long_term.forecasts (stock_id, target_week desc);
 
 alter table long_term.weekly_prices enable row level security;
 alter table long_term.backfill_state enable row level security;
