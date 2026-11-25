@@ -1,5 +1,6 @@
 """Feature-based ML forecasting with chronological model selection and holdout testing."""
 import math
+import os
 import warnings
 
 import numpy as np
@@ -18,9 +19,11 @@ MIN_VALIDATION_ROWS = 3
 MIN_TEST_FOLDS = 3
 MAX_TEST_FOLDS = 8
 RANDOM_STATE = 42
-ROUND_TRIP_COST = 0.003  # 0.10% fee + 0.05% slippage on each side
-MIN_EXPECTED_NET_RETURN = 0.002  # Align with the website's 0.2% long-term default
+ROUND_TRIP_COST = float(os.getenv('LONG_ROUND_TRIP_COST', '0.003'))
+MIN_EXPECTED_NET_RETURN = float(os.getenv('LONG_MIN_EXPECTED_NET_RETURN', '0.002'))
 MIN_PREDICTED_GROSS_RETURN = ROUND_TRIP_COST + MIN_EXPECTED_NET_RETURN
+if ROUND_TRIP_COST < 0 or MIN_EXPECTED_NET_RETURN < 0:
+    raise ValueError('Long-term trading cost and minimum net return must be non-negative')
 MIN_VALIDATION_TRADES = 3
 MAX_ACCEPTABLE_DRAWDOWN = 0.20
 MIN_ACCEPTABLE_PROFIT_FACTOR = 1.0
@@ -119,14 +122,17 @@ def _score(actual_returns, predicted_returns):
 
 
 
-def _strategy_metrics(actual_log_returns, predicted_log_returns):
+def _strategy_metrics(actual_log_returns, predicted_log_returns, *, round_trip_cost=ROUND_TRIP_COST, minimum_net_return=MIN_EXPECTED_NET_RETURN):
     """Simulate non-overlapping long-only trades after round-trip costs."""
     actual = np.asarray(actual_log_returns, dtype=float)
     predicted = np.asarray(predicted_log_returns, dtype=float)
     actual_simple = np.expm1(np.clip(actual, -20.0, 20.0))
     predicted_simple = np.expm1(np.clip(predicted, -20.0, 20.0))
-    selected = predicted_simple >= MIN_PREDICTED_GROSS_RETURN
-    trade_returns = actual_simple[selected] - ROUND_TRIP_COST
+    if round_trip_cost < 0 or minimum_net_return < 0:
+        raise ValueError('Trading cost and minimum net return must be non-negative')
+    required_gross = round_trip_cost + minimum_net_return
+    selected = predicted_simple >= required_gross
+    trade_returns = actual_simple[selected] - round_trip_cost
     equity = 1.0
     peak = 1.0
     max_drawdown = 0.0
@@ -157,9 +163,9 @@ def _strategy_metrics(actual_log_returns, predicted_log_returns):
         "max_drawdown": float(-max_drawdown),
         "profit_factor": float(profit_factor),
         "risk_adjusted_score": float(score) if score is not None else None,
-        "round_trip_cost": ROUND_TRIP_COST,
-        "minimum_expected_net_return": MIN_EXPECTED_NET_RETURN,
-        "minimum_predicted_gross_return": MIN_PREDICTED_GROSS_RETURN,
+        "round_trip_cost": float(round_trip_cost),
+        "minimum_expected_net_return": float(minimum_net_return),
+        "minimum_predicted_gross_return": float(required_gross),
         "eligible": bool(eligible),
     }
 
@@ -174,7 +180,7 @@ def _non_overlapping_indices(origins, horizon_step):
             last_origin = int(origin)
     return np.asarray(selected, dtype=int)
 
-def _select_model(X_train, y_train, X_valid, y_valid, valid_origins, horizon_step):
+def _select_model(X_train, y_train, X_valid, y_valid, valid_origins, horizon_step, *, round_trip_cost=ROUND_TRIP_COST, minimum_net_return=MIN_EXPECTED_NET_RETURN):
     """Select on chronological validation using net return, drawdown and prediction error."""
     if len(y_train) < MIN_SUPERVISED_ROWS or len(y_valid) < MIN_VALIDATION_ROWS:
         return None, {"status": "insufficient_validation"}
@@ -190,7 +196,7 @@ def _select_model(X_train, y_train, X_valid, y_valid, valid_origins, horizon_ste
             model.fit(X_train, y_train)
         pred = model.predict(X_valid)
         errors = np.abs(np.exp(y_valid) - np.exp(pred))
-        trading = _strategy_metrics(y_valid[non_overlap], pred[non_overlap])
+        trading = _strategy_metrics(y_valid[non_overlap], pred[non_overlap], round_trip_cost=round_trip_cost, minimum_net_return=minimum_net_return)
         results[name] = {
             "validation_mae_price_ratio": float(np.mean(errors)),
             "validation_observations": int(len(errors)),
@@ -211,7 +217,7 @@ def _select_model(X_train, y_train, X_valid, y_valid, valid_origins, horizon_ste
                     "minimum_profit_factor": MIN_ACCEPTABLE_PROFIT_FACTOR,
                     "candidates": results}
 
-def evaluate_ml_horizon(prices, horizon_days):
+def evaluate_ml_horizon(prices, horizon_days, *, round_trip_cost=ROUND_TRIP_COST, minimum_net_return=MIN_EXPECTED_NET_RETURN):
     """Select on an earlier chronological segment; report only later holdout folds."""
     values = np.asarray(prices, dtype=float)
     X, y, origins, target_indices = build_supervised(values, horizon_days)
@@ -246,7 +252,8 @@ def evaluate_ml_horizon(prices, horizon_days):
         }
 
     winner, selection = _select_model(X_train, y_train, X_valid, y_valid,
-                                      validation_origins, step)
+                                      validation_origins, step, round_trip_cost=round_trip_cost,
+                                      minimum_net_return=minimum_net_return)
     if winner is None:
         return {"status": selection["status"], "horizon_days": int(horizon_days), **selection}
 
@@ -287,7 +294,8 @@ def evaluate_ml_horizon(prices, horizon_days):
 
     # Evaluate returns against a zero-return (last-price) baseline.
     metrics = _score(model_actual, model_pred)
-    holdout_non_overlap = _strategy_metrics(model_actual, model_pred)
+    holdout_non_overlap = _strategy_metrics(model_actual, model_pred, round_trip_cost=round_trip_cost,
+                                               minimum_net_return=minimum_net_return)
     final_train_idx = np.flatnonzero(target_indices <= len(values) - 1)
     latest_model = _models()[winner]
     with warnings.catch_warnings():
