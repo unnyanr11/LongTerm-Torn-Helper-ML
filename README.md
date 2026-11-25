@@ -59,6 +59,40 @@ horizon-specific out-of-sample validation and calibration are implemented.
 The current validation compares one-week walk-forward errors with a
 last-observed-close baseline; it is not proof of profitability.
 
+
+## Multi-model machine-learning engine
+
+The long-term prediction worker now uses a feature-based Python model competition
+instead of relying on a single log-linear trend equation. Candidate estimators
+are Ridge regression, Random Forest, Extra Trees, and histogram gradient
+boosting. Features are calculated only from weekly observations available at
+the forecast origin: lagged log returns, rolling return statistics, recent
+trend slope, and price distance from rolling means.
+
+For every stock, lookback window, and horizon:
+
+1. Build supervised samples whose targets are future log returns at the requested
+   weekly-aligned horizon.
+2. Keep the samples in chronological order; never shuffle time-series rows.
+3. Select the candidate with the lowest error on a later validation segment.
+4. Refit the selected estimator at each non-overlapping holdout origin using only
+   labels that would already have been known at that origin.
+5. Compare holdout price-ratio MAE with a zero-return / last-close baseline.
+6. Store the selected model, candidate validation metrics, holdout metrics,
+   fold count, and forecast cutoff with each forecast.
+
+A model is marked validated only when it beats the baseline MAE by at least 5%
+on at least three non-overlapping holdout folds. Insufficient combinations are
+reported as insufficient rather than being promoted. A five-year weekly series
+cannot support three independent one-year holdout folds after feature warm-up
+and model selection; the one-year horizon may therefore remain unvalidated.
+This is an honest data-coverage limitation, not a reason to fabricate folds.
+
+The candidate models are deliberately kept within scikit-learn so the GitHub
+Actions environment remains reproducible. Model complexity is not evidence of
+profitability. Signals remain `wait`; this pipeline is research and forecast
+evaluation, not a trading recommendation or a guarantee of returns.
+
 ## Planned stages
 
 1. Verify the upstream all-time/weekly endpoint and coverage for all 35 stocks.
