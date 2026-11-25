@@ -24,3 +24,10 @@ create unique index if not exists forecast_calibrations_one_active
     where status = 'active';
 create index if not exists forecast_calibrations_lookup
     on long_term.forecast_calibrations(stock_id, analysis_range_days, horizon_days, status);
+
+-- Match the existing private-schema posture: no browser-role access and no
+-- policies are created. The server-side database owner remains able to write.
+alter table long_term.forecast_calibrations enable row level security;
+revoke all on table long_term.forecast_calibrations from public, anon, authenticated;
+revoke all on sequence long_term.forecast_calibrations_calibration_id_seq
+    from public, anon, authenticated;
