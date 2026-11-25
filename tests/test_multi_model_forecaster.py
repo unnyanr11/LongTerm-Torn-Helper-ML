@@ -6,6 +6,7 @@ from long_term.ml_forecaster import (
     evaluate_ml_horizon,
     _features,
     MIN_FEATURE_HISTORY,
+    _strategy_metrics,
 )
 
 
@@ -33,6 +34,26 @@ class MultiModelForecastTests(unittest.TestCase):
         })
         self.assertGreaterEqual(result["holdout_folds"], 3)
         self.assertGreaterEqual(result["holdout"]["observations"], 3)
+
+
+    def test_strategy_metrics_deduct_costs_and_track_drawdown(self):
+        result = _strategy_metrics(
+            np.log1p([0.02, -0.01, 0.03]),
+            np.log1p([0.02, 0.02, 0.03]),
+        )
+        self.assertEqual(result["trades"], 3)
+        self.assertEqual(result["wins"], 2)
+        self.assertGreater(result["max_drawdown"], -0.001)
+        self.assertGreater(result["total_return"], 0)
+        self.assertTrue(result["eligible"])
+
+    def test_strategy_metrics_rejects_unprofitable_or_too_few_trades(self):
+        result = _strategy_metrics(
+            np.log1p([-0.02, -0.01, -0.03]),
+            np.log1p([0.02, 0.02, 0.03]),
+        )
+        self.assertFalse(result["eligible"])
+        self.assertLessEqual(result["total_return"], 0)
 
     def test_long_horizon_without_enough_holdout_is_not_validated(self):
         prices = [100.0 * (1.002 ** i) for i in range(261)]
