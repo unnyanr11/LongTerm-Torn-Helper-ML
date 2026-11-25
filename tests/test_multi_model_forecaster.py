@@ -64,6 +64,28 @@ class MultiModelForecastTests(unittest.TestCase):
             "insufficient_non_overlapping_validation_trades",
         })
 
+    def test_forecast_signal_requires_validated_profitable_holdout(self):
+        from long_term.predict_daily import _forecast_signal
+        validated = {
+            "status": "validated",
+            "holdout_trading": {
+                "eligible": True,
+                "round_trip_cost": 0.003,
+                "minimum_expected_net_return": 0.002,
+            },
+        }
+        self.assertEqual(_forecast_signal(100.6, 100.0, validated), "buy")
+        self.assertEqual(_forecast_signal(100.4, 100.0, validated), "wait")
+        self.assertEqual(_forecast_signal(99.4, 100.0, validated), "sell")
+        self.assertEqual(_forecast_signal(110.0, 100.0, {**validated, "status": "rejected"}), "wait")
+        self.assertEqual(_forecast_signal(110.0, 100.0, {"status": "validated", "holdout_trading": {"eligible": False}}), "wait")
+
+    def test_forecast_signal_rejects_invalid_prices(self):
+        from long_term.predict_daily import _forecast_signal
+        validation = {"status": "validated", "holdout_trading": {"eligible": True}}
+        self.assertEqual(_forecast_signal(float("nan"), 100.0, validation), "wait")
+        self.assertEqual(_forecast_signal(100.0, 0.0, validation), "wait")
+
 
 if __name__ == "__main__":
     unittest.main()
