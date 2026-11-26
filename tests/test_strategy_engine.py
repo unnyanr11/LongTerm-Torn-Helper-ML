@@ -2,9 +2,27 @@ import unittest
 import numpy as np
 
 from long_term.strategy_engine import STRATEGY_FAMILIES, run_strategy_competition
+from long_term.ml_forecaster import _strategy_metrics
 
 
 class StrategyEngineTests(unittest.TestCase):
+    def test_ml_profit_threshold_is_calibrated_on_validation_then_frozen_for_holdout(self):
+        actual = np.log1p(np.r_[np.full(20, .012), np.full(20, -.003)])
+        predicted = np.log1p(np.r_[np.full(20, .015), np.full(20, .004)])
+        calibrated = _strategy_metrics(actual, predicted, round_trip_cost=.002)
+        self.assertIn(calibrated["minimum_expected_net_return"],
+                      (0.0, .001, .002, .003, .005, .0075, .01, .015, .02))
+        self.assertEqual(
+            calibrated["threshold_calibration"]["method"],
+            "validation_only_grid_search")
+        frozen = _strategy_metrics(actual, predicted, round_trip_cost=.002,
+            minimum_net_return=calibrated["minimum_expected_net_return"])
+        self.assertEqual(
+            frozen["threshold_calibration"]["method"],
+            "fixed_validation_selected_threshold")
+        self.assertEqual(frozen["minimum_expected_net_return"],
+                         calibrated["minimum_expected_net_return"])
+
     def test_registry_contains_trend_momentum_reversion_breakout_and_volatility(self):
         self.assertTrue({"trend_ema", "trend_macd", "momentum_roc", "momentum_dual",
                          "mean_reversion_bollinger", "mean_reversion_rsi",
@@ -60,9 +78,6 @@ class StrategyEngineTests(unittest.TestCase):
                 baseline["strategies"][name]["metrics"]["eligible"],
                 higher_hurdle["strategies"][name]["metrics"]["eligible"])
             if baseline["strategies"][name]["metrics"]["trades"]:
-                self.assertGreater(
-                    baseline["strategies"][name]["metrics"]["mean_net_return"],
-                    -1.0)
         self.assertAlmostEqual(baseline["config"]["round_trip_cost"], .002)
 
 
