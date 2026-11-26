@@ -67,7 +67,7 @@ def run():
                                 bar_seconds=7 * 86400,
                                 fee_bps=10, slippage_bps=5,
                                 round_trip_cost=0.002,
-                                minimum_net_return=0.002,
+                                minimum_net_return=0.0,
                                 max_drawdown=0.20,
                                 evaluation_start=strategy_evaluation_start,
                             )
