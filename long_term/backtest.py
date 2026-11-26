@@ -62,6 +62,10 @@ def run():
                             range_result["technical_strategies"][horizon_name] = {
                                 "config": strategy_result["config"],
                                 "best_strategy": strategy_result["best_strategy"],
+                                "best_strategy_for_current_regime": strategy_result.get("best_strategy_for_current_regime"),
+                                "multi_timeframe_confirmation": strategy_result.get("multi_timeframe_confirmation"),
+                                "opportunity_ranking": strategy_result.get("opportunity_ranking", []),
+                                "opportunity_probability_basis": strategy_result.get("opportunity_probability_basis"),
                                 "strategies": {
                                     name: {"status": item["status"], "metrics": item["metrics"],
                                            "trades": item["trades"]}
