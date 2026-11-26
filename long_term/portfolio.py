@@ -75,11 +75,12 @@ def optimize_portfolio(
     cov = cov + np.eye(len(mu)) * max(1e-10, float(np.trace(cov)) / max(1, len(mu)) * 1e-6)
     eigen_max = max(float(np.linalg.eigvalsh(cov).max()), 1e-10)
     step_size = 1.0 / (risk_aversion * eigen_max)
-    weights = _project_capped_simplex(np.ones(len(mu)) / len(mu), cap=max_weight)
+    target_weight = min(1.0, len(mu) * max_weight)
+    weights = _project_capped_simplex(np.ones(len(mu)) / len(mu), total=target_weight, cap=max_weight)
 
     for _ in range(max_iterations):
         gradient = mu - risk_aversion * (cov @ weights)
-        updated = _project_capped_simplex(weights + step_size * gradient, cap=max_weight)
+        updated = _project_capped_simplex(weights + step_size * gradient, total=target_weight, cap=max_weight)
         if float(np.max(np.abs(updated - weights))) <= tolerance:
             weights = updated
             break
