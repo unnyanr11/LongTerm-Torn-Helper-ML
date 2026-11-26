@@ -205,3 +205,25 @@ message.
 
 The default minimum expected net return remains 0.2%, configurable through
 `LONG_MIN_EXPECTED_NET_RETURN`; there is no maximum expected-profit ceiling.
+
+
+## Technical strategy research
+
+The long-term rolling-origin backtest also evaluates nine weekly close-only
+strategy families for every stock, lookback window and forecast horizon:
+EMA trend, MACD trend, ROC momentum, dual momentum, Bollinger mean reversion,
+RSI mean reversion, Donchian breakout, volatility breakout and Bollinger
+squeeze breakout. Signals use only completed weekly closes available at the
+decision point and execute at the next completed weekly close. Missing target
+weeks or gaps in the execution path are skipped; no weekly prices are
+interpolated or fabricated.
+
+The research simulation applies the 0.20% round-trip cost, 0.20% minimum mean
+net trade return, 0.5% equity risk budget, 15% position cap, close-only
+volatility stop and 2R target. Eligibility requires at least five trades,
+positive compounded return, profit factor above 1, maximum drawdown within
+20%, and mean net trade return of at least 0.20%. Buy-and-hold and cash are
+reported as explicit baselines. Strategy results are saved inside each
+existing `long_term.model_runs.metrics` JSON document; no schema, grants or
+RLS policies are changed. Strategies remain research-only and do not issue
+orders or override validated forecast signals.

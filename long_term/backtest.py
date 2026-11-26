@@ -1,11 +1,12 @@
 """Run per-stock, per-lookback, per-horizon rolling-origin backtests."""
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from .db import connect
 from .ml_forecaster import evaluate_ml_horizon, MIN_FEATURE_HISTORY
 from .predict_daily import ANALYSIS_RANGES, FORECAST_HORIZONS
 from .stock_universe import STOCKS
+from .strategy_engine import run_strategy_competition
 
 MODEL_NAME = "multi_model_ml_walk_forward"
 MODEL_VERSION = "3.0.0"
@@ -36,12 +37,43 @@ def run():
                 any_validated = False
                 for range_name, range_days in ANALYSIS_RANGES:
                     range_start = origin - timedelta(days=range_days)
-                    selected = [price for week, price in rows if week >= range_start and week <= origin]
-                    range_result = {"analysis_range_days": range_days, "observations": len(selected), "horizons": {}}
+                    selected_rows = [(week, price) for week, price in rows if week >= range_start and week <= origin]
+                    selected = [price for _week, price in selected_rows]
+                    strategy_times = [
+                        int(datetime.combine(week, datetime.min.time(), tzinfo=timezone.utc).timestamp())
+                        for week, _price in selected_rows
+                    ]
+                    range_result = {"analysis_range_days": range_days, "observations": len(selected),
+                                    "horizons": {}, "technical_strategies": {}}
                     for horizon_name, horizon_days in FORECAST_HORIZONS:
                         evaluation = evaluate_ml_horizon(selected, horizon_days)
                         range_result["horizons"][horizon_name] = evaluation
                         any_validated = any_validated or evaluation.get("status") == "validated"
+                        if len(selected) >= 80:
+                            strategy_result = run_strategy_competition(
+                                strategy_times, selected,
+                                horizon_steps=max(1, (horizon_days + 6) // 7),
+                                bar_seconds=7 * 86400,
+                                fee_bps=10, slippage_bps=5,
+                                round_trip_cost=0.002,
+                                minimum_net_return=0.002,
+                                max_drawdown=0.20,
+                            )
+                            range_result["technical_strategies"][horizon_name] = {
+                                "config": strategy_result["config"],
+                                "best_strategy": strategy_result["best_strategy"],
+                                "strategies": {
+                                    name: {"status": item["status"], "metrics": item["metrics"],
+                                           "trades": item["trades"]}
+                                    for name, item in strategy_result["strategies"].items()
+                                },
+                            }
+                        else:
+                            range_result["technical_strategies"][horizon_name] = {
+                                "status": "insufficient_history",
+                                "observations": len(selected),
+                                "required_observations": 80,
+                            }
                     results[range_name] = range_result
 
                 status = "research"
