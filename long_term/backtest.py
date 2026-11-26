@@ -7,6 +7,7 @@ from .ml_forecaster import evaluate_ml_horizon, MIN_FEATURE_HISTORY
 from .calibration import calibrate_matured_forecasts
 from .predict_daily import ANALYSIS_RANGES, FORECAST_HORIZONS
 from .stock_universe import STOCKS
+from .algorithm_registry import ensure_algorithm_registry, publish_algorithm
 
 MODEL_NAME = "multi_model_ml_walk_forward"
 MODEL_VERSION = "3.0.0"
@@ -15,6 +16,8 @@ MODEL_VERSION = "3.0.0"
 def run():
     processed = skipped = 0
     with connect() as conn:
+        with conn.cursor() as cur:
+            ensure_algorithm_registry(cur)
         for stock_id, symbol in STOCKS.items():
             with conn.cursor() as cur:
                 cur.execute("select pg_try_advisory_xact_lock(%s)", (920000 + stock_id,))
