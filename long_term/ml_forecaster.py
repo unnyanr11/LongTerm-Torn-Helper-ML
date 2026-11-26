@@ -123,54 +123,76 @@ def _score(actual_returns, predicted_returns):
 
 
 
-def _strategy_metrics(actual_log_returns, predicted_log_returns, *, round_trip_cost=ROUND_TRIP_COST, minimum_net_return=MIN_EXPECTED_NET_RETURN):
-    """Simulate non-overlapping long-only trades after round-trip costs."""
+def _strategy_metrics(actual_log_returns, predicted_log_returns, *,
+                      round_trip_cost=ROUND_TRIP_COST, minimum_net_return=None):
+    """Calibrate a minimum net-edge hurdle on validation, or apply a fixed one on holdout.
+
+    None means select the hurdle from validation data only. A numeric value means
+    apply that already-selected hurdle unchanged to a later holdout segment.
+    """
     actual = np.asarray(actual_log_returns, dtype=float)
     predicted = np.asarray(predicted_log_returns, dtype=float)
     actual_simple = np.expm1(np.clip(actual, -20.0, 20.0))
     predicted_simple = np.expm1(np.clip(predicted, -20.0, 20.0))
-    if (not math.isfinite(round_trip_cost) or not math.isfinite(minimum_net_return)
-            or round_trip_cost < 0 or minimum_net_return < 0):
-        raise ValueError('Trading cost and minimum net return must be finite and non-negative')
-    required_gross = round_trip_cost + minimum_net_return
-    selected = predicted_simple >= required_gross
-    trade_returns = actual_simple[selected] - round_trip_cost
-    equity = 1.0
-    peak = 1.0
-    max_drawdown = 0.0
-    wins = []
-    losses = []
-    for net_return in trade_returns:
-        equity *= max(0.0, 1.0 + float(net_return))
-        peak = max(peak, equity)
-        max_drawdown = max(max_drawdown, 1.0 - equity / peak)
-        (wins if net_return > 0 else losses).append(float(net_return))
-    gross_wins = sum(wins)
-    gross_losses = abs(sum(losses))
-    profit_factor = (min(1000.0, gross_wins / gross_losses)
-                     if gross_losses > 0 else (1000.0 if gross_wins > 0 else 0.0))
-    total_return = equity - 1.0
-    trades = int(len(trade_returns))
-    eligible = (trades >= MIN_VALIDATION_TRADES
-                and total_return > 0
-                and profit_factor > MIN_ACCEPTABLE_PROFIT_FACTOR
-                and max_drawdown <= MAX_ACCEPTABLE_DRAWDOWN)
-    score = total_return / max(max_drawdown, 0.01) if trades else None
-    return {
-        "trades": trades,
-        "wins": int(np.sum(trade_returns > 0)),
-        "losses": int(np.sum(trade_returns < 0)),
-        "win_rate": float(np.mean(trade_returns > 0)) if trades else None,
-        "total_return": float(total_return),
-        "max_drawdown": float(-max_drawdown),
-        "profit_factor": float(profit_factor),
-        "risk_adjusted_score": float(score) if score is not None else None,
-        "round_trip_cost": float(round_trip_cost),
-        "minimum_expected_net_return": float(minimum_net_return),
-        "minimum_predicted_gross_return": float(required_gross),
-        "eligible": bool(eligible),
+    if not math.isfinite(round_trip_cost) or round_trip_cost < 0:
+        raise ValueError('Trading cost must be finite and non-negative')
+    grid = (0.0, 0.001, 0.002, 0.003, 0.005, 0.0075, 0.01, 0.015, 0.02)
+    candidates = []
+    thresholds = grid if minimum_net_return is None else (float(minimum_net_return),)
+    for threshold in thresholds:
+        if not math.isfinite(threshold) or threshold < 0:
+            raise ValueError('Minimum net return must be finite and non-negative')
+        selected = predicted_simple >= (round_trip_cost + threshold)
+        trade_returns = actual_simple[selected] - round_trip_cost
+        equity = 1.0
+        peak = 1.0
+        max_drawdown = 0.0
+        wins = []
+        losses = []
+        for net_return in trade_returns:
+            equity *= max(0.0, 1.0 + float(net_return))
+            peak = max(peak, equity)
+            max_drawdown = max(max_drawdown, 1.0 - equity / peak)
+            (wins if net_return > 0 else losses).append(float(net_return))
+        gross_wins = sum(wins)
+        gross_losses = abs(sum(losses))
+        profit_factor = (min(1000.0, gross_wins / gross_losses)
+                         if gross_losses > 0 else (1000.0 if gross_wins > 0 else 0.0))
+        total_return = equity - 1.0
+        trades = int(len(trade_returns))
+        eligible = (trades >= MIN_VALIDATION_TRADES and total_return > 0
+                    and profit_factor > MIN_ACCEPTABLE_PROFIT_FACTOR
+                    and max_drawdown <= MAX_ACCEPTABLE_DRAWDOWN)
+        score = total_return / max(max_drawdown, 0.01) if trades else None
+        candidates.append({
+            "minimum_expected_net_return": float(threshold),
+            "trades": trades,
+            "wins": int(np.sum(trade_returns > 0)),
+            "losses": int(np.sum(trade_returns < 0)),
+            "win_rate": float(np.mean(trade_returns > 0)) if trades else None,
+            "total_return": float(total_return),
+            "max_drawdown": float(-max_drawdown),
+            "profit_factor": float(profit_factor),
+            "risk_adjusted_score": float(score) if score is not None else None,
+            "round_trip_cost": float(round_trip_cost),
+            "eligible": bool(eligible),
+        })
+    eligible_candidates = [item for item in candidates if item["eligible"]]
+    usable_candidates = eligible_candidates or [item for item in candidates if item["trades"] >= MIN_VALIDATION_TRADES]
+    if usable_candidates:
+        chosen = max(usable_candidates, key=lambda item: (
+            item["risk_adjusted_score"] if item["risk_adjusted_score"] is not None else -1e9,
+            item["total_return"], item["profit_factor"]))
+    else:
+        chosen = min(candidates, key=lambda item: item["minimum_expected_net_return"])
+    result = dict(chosen)
+    result["threshold_calibration"] = {
+        "method": "validation_only_grid_search" if minimum_net_return is None else "fixed_validation_selected_threshold",
+        "thresholds_tested": list(grid) if minimum_net_return is None else [float(minimum_net_return)],
+        "selected_minimum_net_return": chosen["minimum_expected_net_return"],
+        "candidates": candidates,
     }
-
+    return result
 
 def _non_overlapping_indices(origins, horizon_step):
     """Keep validation/holdout decisions at least one forecast horizon apart."""
@@ -182,7 +204,7 @@ def _non_overlapping_indices(origins, horizon_step):
             last_origin = int(origin)
     return np.asarray(selected, dtype=int)
 
-def _select_model(X_train, y_train, X_valid, y_valid, valid_origins, horizon_step, *, round_trip_cost=ROUND_TRIP_COST, minimum_net_return=MIN_EXPECTED_NET_RETURN):
+def _select_model(X_train, y_train, X_valid, y_valid, valid_origins, horizon_step, *, round_trip_cost=ROUND_TRIP_COST, minimum_net_return=None):
     """Select on chronological validation using net return, drawdown and prediction error."""
     if len(y_train) < MIN_SUPERVISED_ROWS or len(y_valid) < MIN_VALIDATION_ROWS:
         return None, {"status": "insufficient_validation"}
@@ -219,7 +241,7 @@ def _select_model(X_train, y_train, X_valid, y_valid, valid_origins, horizon_ste
                     "minimum_profit_factor": MIN_ACCEPTABLE_PROFIT_FACTOR,
                     "candidates": results}
 
-def evaluate_ml_horizon(prices, horizon_days, *, round_trip_cost=ROUND_TRIP_COST, minimum_net_return=MIN_EXPECTED_NET_RETURN):
+def evaluate_ml_horizon(prices, horizon_days, *, round_trip_cost=ROUND_TRIP_COST, minimum_net_return=None):
     """Select on an earlier chronological segment; report only later holdout folds."""
     values = np.asarray(prices, dtype=float)
     X, y, origins, target_indices = build_supervised(values, horizon_days)
@@ -331,8 +353,9 @@ def evaluate_ml_horizon(prices, horizon_days, *, round_trip_cost=ROUND_TRIP_COST
 
     # Evaluate returns against a zero-return (last-price) baseline.
     metrics = _score(model_actual, model_pred)
+    selected_profit_threshold = selection['candidates'][winner]['validation_trading']['minimum_expected_net_return']
     holdout_non_overlap = _strategy_metrics(model_actual, model_pred, round_trip_cost=round_trip_cost,
-                                               minimum_net_return=minimum_net_return)
+                                               minimum_net_return=selected_profit_threshold)
     final_train_idx = np.flatnonzero(target_indices <= len(values) - 1)
     latest_selected_model = (fold_model_selection[-1]["selected_model"]
                              if fold_model_selection else winner)
@@ -357,6 +380,8 @@ def evaluate_ml_horizon(prices, horizon_days, *, round_trip_cost=ROUND_TRIP_COST
         "holdout_folds": int(len(model_actual)),
         "holdout": metrics,
         "holdout_trading": holdout_non_overlap,
+        "profit_threshold_calibration": selection["candidates"][winner]["validation_trading"]["threshold_calibration"],
+        "selected_minimum_expected_net_return": selected_profit_threshold,
         "latest_predicted_log_return": latest_log_return,
         "latest_predicted_price": forecast_price,
         "latest_origin_price": float(values[-1]),
