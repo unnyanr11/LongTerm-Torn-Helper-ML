@@ -166,6 +166,7 @@ def _strategy_metrics(actual_log_returns, predicted_log_returns, *,
         score = total_return / max(max_drawdown, 0.01) if trades else None
         candidates.append({
             "minimum_expected_net_return": float(threshold),
+            "minimum_predicted_gross_return": float(round_trip_cost + threshold),
             "trades": trades,
             "wins": int(np.sum(trade_returns > 0)),
             "losses": int(np.sum(trade_returns < 0)),
