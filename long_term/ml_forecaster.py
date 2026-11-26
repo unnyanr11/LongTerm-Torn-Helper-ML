@@ -10,6 +10,7 @@ from sklearn.linear_model import ElasticNet, Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error
+from .algorithm_registry import algorithm_id_for_family
 
 FEATURE_LAGS = (1, 2, 3, 4, 8, 13, 26)
 ROLLING_WINDOWS = (4, 8, 13, 26)
@@ -183,7 +184,7 @@ def _select_model(X_train, y_train, X_valid, y_valid):
                     "ranking_method": "validation MAE, then RMSE, then directional accuracy",
                     "candidates": results}
 
-def evaluate_ml_horizon(prices, horizon_days):
+def evaluate_ml_horizon(prices, horizon_days, *, preferred_model=None):
     """Select on an earlier chronological segment; report only later holdout folds."""
     values = np.asarray(prices, dtype=float)
     X, y, origins, target_indices = build_supervised(values, horizon_days)
@@ -291,8 +292,11 @@ def evaluate_ml_horizon(prices, horizon_days):
     # Evaluate returns against a zero-return (last-price) baseline.
     metrics = _score(model_actual, model_pred)
     final_train_idx = np.flatnonzero(target_indices <= len(values) - 1)
-    latest_selected_model = (fold_model_selection[-1]["selected_model"]
-                             if fold_model_selection else winner)
+    latest_selected_model = (
+        preferred_model if preferred_model in _models() else
+        (fold_model_selection[-1]["selected_model"] if fold_model_selection else winner)
+    )
+    selection_source = "stock_algorithm_registry" if preferred_model in _models() else "walk_forward_model_competition"
     latest_model = _models()[latest_selected_model]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", ConvergenceWarning)
@@ -306,6 +310,8 @@ def evaluate_ml_horizon(prices, horizon_days):
         "horizon_days": int(horizon_days),
         "effective_horizon_weeks": max(1, math.ceil(horizon_days / 7)),
         "selected_model": latest_selected_model,
+        "selected_algorithm_id": algorithm_id_for_family(latest_selected_model),
+        "algorithm_selection_source": selection_source,
         "initial_selection": selection,
         "fold_model_selection": fold_model_selection,
         "training_rows": int(len(X_train)),

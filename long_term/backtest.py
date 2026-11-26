@@ -7,6 +7,7 @@ from .ml_forecaster import evaluate_ml_horizon, MIN_FEATURE_HISTORY
 from .calibration import calibrate_matured_forecasts
 from .predict_daily import ANALYSIS_RANGES, FORECAST_HORIZONS
 from .stock_universe import STOCKS
+from .algorithm_registry import ensure_algorithm_registry, publish_algorithm
 
 MODEL_NAME = "multi_model_ml_walk_forward"
 MODEL_VERSION = "3.0.0"
@@ -15,6 +16,8 @@ MODEL_VERSION = "3.0.0"
 def run():
     processed = skipped = 0
     with connect() as conn:
+        with conn.cursor() as cur:
+            ensure_algorithm_registry(cur)
         for stock_id, symbol in STOCKS.items():
             with conn.cursor() as cur:
                 cur.execute("select pg_try_advisory_xact_lock(%s)", (920000 + stock_id,))
@@ -76,9 +79,47 @@ def run():
                     """insert into long_term.model_runs
                        (stock_id,model_name,model_version,data_through,training_start,
                         validation_start,test_start,metrics,status)
-                       values (%s,%s,%s,%s,%s,%s,null,%s::jsonb,%s)""",
+                       values (%s,%s,%s,%s,%s,%s,null,%s::jsonb,%s)
+                       returning run_id""",
                     (stock_id, MODEL_NAME, MODEL_VERSION, origin, rows[0][0],
                      rows[min(26, len(rows)-1)][0], json.dumps(metrics), status),
+                )
+                run_id = cur.fetchone()[0]
+
+                # Persist a validated winner separately for every stock/range/horizon.
+                # Rejected or insufficient candidates leave the previous winner intact.
+                for range_name, range_result in results.items():
+                    range_days = int(range_result["analysis_range_days"])
+                    for horizon_name, evaluation in range_result.get("horizons", {}).items():
+                        family = evaluation.get("selected_model")
+                        if evaluation.get("status") != "validated" or not family:
+                            continue
+                        horizon_days = dict(FORECAST_HORIZONS)[horizon_name]
+                        published = publish_algorithm(
+                            cur, stock_id=stock_id,
+                            analysis_range_days=range_days,
+                            horizon_days=horizon_days,
+                            model_family=family,
+                            data_through=origin,
+                            source_model_run_id=run_id,
+                            metrics={
+                                "holdout": evaluation.get("holdout", {}),
+                                "holdout_folds": evaluation.get("holdout_folds", 0),
+                                "validation_rows": evaluation.get("validation_rows", 0),
+                                "selection": evaluation.get("initial_selection", {}),
+                            },
+                        )
+                        evaluation["selected_algorithm_id"] = published["algorithm_id"]
+                        evaluation["algorithm_registry_version"] = published["version"]
+                        print(
+                            f"{symbol} {range_name}/{horizon_name}: "
+                            f"published algorithm {published['algorithm_id']} "
+                            f"({family}) v{published['version']}"
+                        )
+                metrics["analysis_ranges"] = results
+                cur.execute(
+                    "update long_term.model_runs set metrics=%s::jsonb where run_id=%s",
+                    (json.dumps(metrics), run_id),
                 )
                 processed += 1
                 print(f"{symbol}: {status}; {len(rows)} complete weeks")
