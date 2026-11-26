@@ -17,6 +17,7 @@ from .evaluation import horizon_weeks
 from .ml_forecaster import (evaluate_ml_horizon, ROUND_TRIP_COST, MIN_EXPECTED_NET_RETURN)
 from .portfolio import build_portfolio_research
 from .stock_universe import STOCKS
+from .algorithm_registry import ensure_algorithm_registry, load_active_algorithms
 
 MODEL_NAME = "multi_model_ml_forecast"
 MODEL_VERSION = "5.1.0"
@@ -225,6 +226,8 @@ def run():
                     skipped += 1
                     continue
 
+                ensure_algorithm_registry(cur)
+                active_algorithms = load_active_algorithms(cur, stock_id)
                 origin_week = rows[-1][0]
                 origin_price = float(rows[-1][1])
                 range_results = {}
@@ -244,7 +247,11 @@ def run():
                         result["status"] = "research"
 
                         for horizon_name, horizon_days in FORECAST_HORIZONS:
-                            horizon_validation = evaluate_ml_horizon(prices, horizon_days)
+                            registry_entry = active_algorithms.get((range_days, horizon_days))
+                            horizon_validation = evaluate_ml_horizon(
+                                prices, horizon_days,
+                                preferred_model=(registry_entry["model_family"] if registry_entry else None),
+                            )
                             predicted = horizon_validation.get("latest_predicted_price")
                             if predicted is None:
                                 continue
@@ -273,6 +280,9 @@ def run():
                                 "effective_weekly_horizon_days": effective_days,
                                 "horizon_validation": horizon_validation,
                                 "selected_model": horizon_validation.get("selected_model"),
+                                "selected_algorithm_id": horizon_validation.get("selected_algorithm_id"),
+                                "algorithm_selection_source": horizon_validation.get("algorithm_selection_source"),
+                                "algorithm_registry_version": (registry_entry.get("version") if registry_entry else None),
                                 "holdout_metrics": horizon_validation.get("holdout"),
                                 "calibration": {
                                     "active": active_calibration,
