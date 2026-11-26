@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import math
 import numpy as np
-from market_intelligence import (classify_market_regime, adaptive_exit_plan, select_strategy_for_regime, multi_timeframe_confirmation, score_opportunity)
+from .market_intelligence import (classify_market_regime, adaptive_exit_plan, select_strategy_for_regime, multi_timeframe_confirmation, score_opportunity)
 
 STRATEGY_FAMILIES = (
     "trend_ema", "trend_macd", "momentum_roc", "momentum_dual",
