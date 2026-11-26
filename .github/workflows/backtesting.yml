@@ -1,6 +1,10 @@
 name: Long-term rolling-origin backtesting
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'long_term/backtest.py'
   workflow_dispatch:
 
 permissions:
