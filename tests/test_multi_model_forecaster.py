@@ -51,7 +51,6 @@ class MultiModelForecastTests(unittest.TestCase):
         self.assertIn(result["status"], {
             "insufficient_ml_history",
             "insufficient_holdout_folds",
-            "insufficient_non_overlapping_validation_trades",
         })
 
     def test_forecast_signal_uses_accuracy_validation_and_separate_live_cost_gate(self):
