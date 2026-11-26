@@ -4,9 +4,9 @@ import os
 import warnings
 
 import numpy as np
-from sklearn.ensemble import ExtraTreesRegressor, HistGradientBoostingRegressor, RandomForestRegressor
+from sklearn.ensemble import ExtraTreesRegressor, HistGradientBoostingRegressor, RandomForestRegressor, VotingRegressor
 from sklearn.exceptions import ConvergenceWarning
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import ElasticNet, Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error
@@ -86,6 +86,10 @@ def build_supervised(prices, horizon_days):
 def _models():
     return {
         "ridge": make_pipeline(StandardScaler(), Ridge(alpha=10.0)),
+        "elastic_net": make_pipeline(
+            StandardScaler(), ElasticNet(alpha=0.001, l1_ratio=0.35, max_iter=10000,
+                                         random_state=RANDOM_STATE),
+        ),
         "random_forest": RandomForestRegressor(
             n_estimators=120, max_depth=5, min_samples_leaf=3,
             max_features=0.8, random_state=RANDOM_STATE, n_jobs=1,
@@ -98,6 +102,25 @@ def _models():
             max_iter=100, learning_rate=0.04, max_leaf_nodes=7,
             l2_regularization=2.0, random_state=RANDOM_STATE,
         ),
+        "ensemble": VotingRegressor(estimators=[
+            ("ridge", make_pipeline(StandardScaler(), Ridge(alpha=10.0))),
+            ("elastic_net", make_pipeline(
+                StandardScaler(), ElasticNet(alpha=0.001, l1_ratio=0.35,
+                                             max_iter=10000, random_state=RANDOM_STATE),
+            )),
+            ("random_forest", RandomForestRegressor(
+                n_estimators=120, max_depth=5, min_samples_leaf=3,
+                max_features=0.8, random_state=RANDOM_STATE, n_jobs=1,
+            )),
+            ("extra_trees", ExtraTreesRegressor(
+                n_estimators=160, max_depth=6, min_samples_leaf=3,
+                max_features=0.8, random_state=RANDOM_STATE, n_jobs=1,
+            )),
+            ("hist_gradient_boosting", HistGradientBoostingRegressor(
+                max_iter=100, learning_rate=0.04, max_leaf_nodes=7,
+                l2_regularization=2.0, random_state=RANDOM_STATE,
+            )),
+        ], n_jobs=1),
     }
 
 
