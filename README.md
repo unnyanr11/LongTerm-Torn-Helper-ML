@@ -91,18 +91,16 @@ For each stock/lookback/horizon:
 
 1. Construct supervised samples using the requested weekly-aligned future log return.
 2. Keep samples chronological; do not shuffle time-series rows.
-3. Evaluate candidates on a strictly later validation segment. Validation trade decisions are spaced at least one full forecast horizon apart, so overlapping positions are not counted as separate trades.
-4. Simulate long-only entries only when predicted return exceeds estimated round-trip costs (0.10% fee plus 0.05% slippage on each side; 0.20% total) and predicted net return must meet the 0.20% default minimum (at least 0.40% predicted gross return).
-5. Reject candidates with fewer than three validation trades, non-positive compounded net return, profit factor at or below 1.0, or maximum drawdown above 20%.
-6. Rank the remaining candidates by compounded net return divided by the larger of absolute maximum drawdown or 1%, then by profit factor and validation MAE.
-7. Refit the selected candidate at non-overlapping holdout origins using only labels already known at each origin; record holdout prediction and trading metrics.
+3. Evaluate candidates on a strictly later chronological validation segment using prediction error only.
+4. Rank candidates by validation MAE, then RMSE, then directional accuracy. No trading simulation or profitability criteria participate in model selection.
+5. Refit the selected candidate at expanding walk-forward origins using only labels already known at each origin; evaluate on untouched, non-overlapping holdout observations.
 8. Save the selected model, validation and holdout metrics, fold count and data cutoff with the forecast.
 
-A combination is marked `validated` only when holdout MAE improves on the baseline by at least 5%, at least three non-overlapping holdout folds are available, and the holdout trading simulation also has at least three trades, positive net compounded return, profit factor above 1.0 and maximum drawdown no greater than 20%. If no candidate passes the validation risk filters, no model is selected for that horizon. Otherwise it may be rejected or insufficient. A generated predicted price is not, by itself, evidence that a configuration passed validation. The daily worker emits `buy`, `sell` or `wait` only when that exact horizon passes holdout validation and the predicted move clears the configured round-trip cost plus minimum net-return hurdle. It does not place trades.
+A combination is marked `validated` only when holdout MAE improves on the flat-price baseline by at least 5% and at least three non-overlapping holdout folds are available. This is an accuracy-only decision; fees, slippage, profit thresholds, trade counts, portfolio returns and drawdown are excluded from backtesting. If no candidate passes the validation risk filters, no model is selected for that horizon. Otherwise it may be rejected or insufficient. A generated predicted price is not, by itself, evidence that a configuration passed validation. The daily worker emits `buy`, `sell` or `wait` only when that exact horizon passes holdout validation and the predicted move clears the configured round-trip cost plus minimum net-return hurdle. It does not place trades.
 
 ## Automatic matured-outcome calibration
 
-The daily prediction worker also calibrates forecasts automatically, separately
+The daily prediction worker can also refresh matured-outcome calibration automatically, separately
 for each stock, analysis lookback and forecast horizon. It joins forecasts to
 their completed target-week close; incomplete weeks and forecasts whose target
 has not matured are never used. Calibration fits an affine correction to the
@@ -131,7 +129,7 @@ grant access only through the existing server-side database connection.
 
 `.github/workflows/daily-predictions.yml` is started manually and then maintains an approximately daily cycle using four chained waits of 5 hours 59 minutes 30 seconds before dispatching the next run. GitHub's six-hour job limit, queueing and dispatch latency make this best-effort rather than an exact 24-hour schedule. Each cycle runs the Python unit tests and generates forecasts that are due (a stock is normally eligible for a new model run every 24 hours). Start it from the Actions tab on `main` after configuring the secret.
 
-`.github/workflows/backtesting.yml` runs all stocks, lookback windows and horizons, then re-dispatches another backtest after a two-hour timer. It is a research workflow, not a live prediction source. It stores rolling-origin metrics in `long_term.model_runs`.
+`.github/workflows/backtesting.yml` runs all stocks, lookback windows and horizons, then re-dispatches another backtest after a two-hour timer. It is a backend research and calibration workflow, not a browser inference path. It stores rolling-origin accuracy metrics in `long_term.model_runs` and recalibrates each stock/lookback/horizon from matured actual target-week closes. Calibration deduplicates repeated daily forecasts for the same target week, fits on older observations, validates on a later holdout, and activates a new version only when holdout MAE improves by at least 2%.
 
 ## Local development and tests
 
@@ -171,8 +169,9 @@ walk-forward evaluation, calibration, versioned run metrics, concurrency guards,
 and automated test gates. It does not import Torn-specific short-term features
 or write to the short-term stock shards.
 
-The four existing long-term candidates (Ridge, Random Forest, Extra Trees and
-HistGradientBoosting) compete independently for each stock/lookback/horizon.
+Six long-term candidates (Ridge, ElasticNet, Random Forest, Extra Trees,
+HistGradientBoosting and a VotingRegressor ensemble of all five) compete
+independently for each stock/lookback/horizon.
 Selection is made on earlier chronological validation data; the selected
 candidate is refit on each expanding walk-forward origin before untouched
 holdout evaluation. Daily prediction runs refit from the latest available
