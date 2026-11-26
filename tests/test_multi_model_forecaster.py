@@ -42,6 +42,11 @@ class MultiModelForecastTests(unittest.TestCase):
         })
         self.assertGreaterEqual(result["holdout_folds"], 3)
         self.assertGreaterEqual(result["holdout"]["observations"], 3)
+        self.assertIn("directional_accuracy", result["holdout"])
+        self.assertNotIn("holdout_trading", result)
+        self.assertEqual(result["initial_selection"]["status"], "selected_by_prediction_accuracy")
+        for candidate in result["initial_selection"]["candidates"].values():
+            self.assertNotIn("validation_trading", candidate)
 
 
 
@@ -67,7 +72,7 @@ class MultiModelForecastTests(unittest.TestCase):
 
     def test_forecast_signal_rejects_invalid_prices(self):
         from long_term.predict_daily import _forecast_signal
-        validation = {"status": "validated", "holdout_trading": {"eligible": True}}
+        validation = {"status": "validated"}
         self.assertEqual(_forecast_signal(float("nan"), 100.0, validation), "wait")
         self.assertEqual(_forecast_signal(100.0, 0.0, validation), "wait")
 
