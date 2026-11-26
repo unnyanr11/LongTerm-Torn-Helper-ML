@@ -160,3 +160,48 @@ The commands require `LONG_TERM_DATABASE_URL`. Do not paste credentials into sou
 - Do not use future observations in feature construction, scaling, model selection or calibration.
 - Preserve the exact data cutoff, model version and validation status for every forecast.
 - Keep the weekly database isolated from short-term shards and the main app; do not weaken private-schema grants or RLS to simplify integration.
+
+
+## ML parity and portfolio research upgrade
+
+The long-term worker retains its own stock-specific feature pipeline and weekly
+forecast horizons while following the short-term worker's engineering pattern:
+isolated jobs, deterministic model candidates, chronological model competition,
+walk-forward evaluation, calibration, versioned run metrics, concurrency guards,
+and automated test gates. It does not import Torn-specific short-term features
+or write to the short-term stock shards.
+
+The four existing long-term candidates (Ridge, Random Forest, Extra Trees and
+HistGradientBoosting) compete independently for each stock/lookback/horizon.
+Selection is made on earlier chronological validation data; the selected
+candidate is refit on each expanding walk-forward origin before untouched
+holdout evaluation. Daily prediction runs refit from the latest available
+weekly history, and matured forecast calibration is promoted only after a
+separate chronological holdout improvement.
+
+### Portfolio-level research
+
+Daily prediction cycles additionally calculate research-only long-only
+allocations for each forecast horizon using the validated one-year-lookback
+forecasts. The optimizer:
+- excludes forecasts that have not passed their own holdout and trading gates;
+- deducts the configured round-trip cost and minimum expected net-return hurdle;
+- estimates covariance from aligned, complete weekly closes;
+- uses capped mean-variance optimization with a 15% per-position cap;
+- leaves unused capital in cash when too few eligible assets exist;
+- stores allocations and risk metrics in `long_term.portfolio_allocations`.
+
+These allocations are research outputs, not orders or a promise of returns.
+They do not assume the user's holdings, available capital or brokerage
+execution conditions.
+
+Before enabling portfolio persistence, apply
+`migrations/20261126_portfolio_allocations.sql` once to the dedicated
+long-term Supabase database. The migration creates one additive private table,
+enables RLS on that new table, revokes browser-role access, and does not alter
+any existing RLS policy. If the migration has not yet been applied, ordinary
+daily forecasts continue and the portfolio research step logs a skipped
+message.
+
+The default minimum expected net return remains 0.2%, configurable through
+`LONG_MIN_EXPECTED_NET_RETURN`; there is no maximum expected-profit ceiling.
