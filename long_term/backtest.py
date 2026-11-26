@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from .db import connect
 from .ml_forecaster import evaluate_ml_horizon, MIN_FEATURE_HISTORY
+from .calibration import calibrate_matured_forecasts
 from .predict_daily import ANALYSIS_RANGES, FORECAST_HORIZONS
 from .stock_universe import STOCKS
 
@@ -34,6 +35,7 @@ def run():
                 origin = rows[-1][0]
                 results = {}
                 any_validated = False
+                calibration_results = {}
                 for range_name, range_days in ANALYSIS_RANGES:
                     range_start = origin - timedelta(days=range_days)
                     selected_rows = [(week, price) for week, price in rows if week >= range_start and week <= origin]
@@ -44,6 +46,15 @@ def run():
                         evaluation = evaluate_ml_horizon(selected, horizon_days)
                         range_result["horizons"][horizon_name] = evaluation
                         any_validated = any_validated or evaluation.get("status") == "validated"
+
+                        # Recalibrate backend forecasts from matured actual closes.
+                        # The calibration module uses unique chronological outcomes,
+                        # a 70/30 fit/holdout split, and only promotes proven gains.
+                        calibration_results[f"{range_name}:{horizon_name}"] = (
+                            calibrate_matured_forecasts(
+                                cur, stock_id, range_days, horizon_days
+                            )
+                        )
                     results[range_name] = range_result
 
                 status = "research"
@@ -54,8 +65,10 @@ def run():
                     "baseline": "zero log-return / last observed close carried forward",
                     "promotion_rule": "at least 5% holdout MAE improvement over flat-price baseline; minimum three untouched holdout folds",
                     "weekly_horizon_mapping": "ceil(requested_days / 7); targets are observed weekly closes",
-                    "candidate_models": ["ridge", "random_forest", "extra_trees", "hist_gradient_boosting"],
+                    "candidate_models": ["ridge", "elastic_net", "random_forest", "extra_trees", "hist_gradient_boosting", "ensemble"],
                     "evaluation_scope": "prediction accuracy only; no fees, slippage, net-profit gates, portfolio simulation, or trade execution",
+                    "calibration_scope": "matured backend forecast outcomes only; no browser model export or browser inference",
+                    "calibration_results": calibration_results,
                     "any_pair_validated": any_validated,
                     "analysis_ranges": results,
                 }
