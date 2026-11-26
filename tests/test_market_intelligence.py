@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 
-from market_intelligence import (
+from long_term.market_intelligence import (
     classify_market_regime, multi_timeframe_confirmation,
     calibrate_directional_probabilities, apply_probability_calibration,
     adaptive_exit_plan, score_opportunity, select_strategy_for_regime,
