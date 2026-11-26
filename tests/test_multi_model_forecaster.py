@@ -1,6 +1,8 @@
 import unittest
 import numpy as np
 
+from long_term.algorithm_registry import ALGORITHM_REGISTRY, algorithm_id_for_family, family_for_algorithm_id
+
 from long_term.ml_forecaster import (
     build_supervised,
     evaluate_ml_horizon,
@@ -12,6 +14,23 @@ from long_term.ml_forecaster import (
 
 
 class MultiModelForecastTests(unittest.TestCase):
+    def test_numbered_algorithm_registry_is_stable(self):
+        self.assertEqual(ALGORITHM_REGISTRY, {
+            1: "ridge", 2: "elastic_net", 3: "random_forest",
+            4: "extra_trees", 5: "hist_gradient_boosting", 6: "ensemble",
+        })
+        for algorithm_id, family in ALGORITHM_REGISTRY.items():
+            self.assertEqual(algorithm_id_for_family(family), algorithm_id)
+            self.assertEqual(family_for_algorithm_id(algorithm_id), family)
+
+    def test_prediction_uses_registered_algorithm_for_latest_forecast(self):
+        prices = [100.0 * (1.01 ** i) for i in range(261)]
+        result = evaluate_ml_horizon(prices, 7, preferred_model="extra_trees")
+        self.assertEqual(result["status"], "validated")
+        self.assertEqual(result["selected_model"], "extra_trees")
+        self.assertEqual(result["selected_algorithm_id"], 4)
+        self.assertEqual(result["algorithm_selection_source"], "stock_algorithm_registry")
+
     def test_long_term_defaults_are_point_two_percent_net(self):
         self.assertAlmostEqual(MIN_EXPECTED_NET_RETURN, 0.002)
         self.assertAlmostEqual(ROUND_TRIP_COST, 0.002)
