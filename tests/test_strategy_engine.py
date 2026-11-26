@@ -77,7 +77,6 @@ class StrategyEngineTests(unittest.TestCase):
             self.assertEqual(
                 baseline["strategies"][name]["metrics"]["eligible"],
                 higher_hurdle["strategies"][name]["metrics"]["eligible"])
-            if baseline["strategies"][name]["metrics"]["trades"]:
         self.assertAlmostEqual(baseline["config"]["round_trip_cost"], .002)
 
 
