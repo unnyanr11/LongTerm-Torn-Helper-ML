@@ -49,24 +49,31 @@ def run():
                         evaluation = evaluate_ml_horizon(selected, horizon_days)
                         range_result["horizons"][horizon_name] = evaluation
                         any_validated = any_validated or evaluation.get("status") == "validated"
-                        strategy_result = run_strategy_competition(
-                            strategy_times, selected,
-                            horizon_steps=max(1, (horizon_days + 6) // 7),
-                            bar_seconds=7 * 86400,
-                            fee_bps=10, slippage_bps=5,
-                            round_trip_cost=0.002,
-                            minimum_net_return=0.002,
-                            max_drawdown=0.20,
-                        )
-                        range_result["technical_strategies"][horizon_name] = {
-                            "config": strategy_result["config"],
-                            "best_strategy": strategy_result["best_strategy"],
-                            "strategies": {
-                                name: {"status": item["status"], "metrics": item["metrics"],
-                                       "trades": item["trades"]}
-                                for name, item in strategy_result["strategies"].items()
-                            },
-                        }
+                        if len(selected) >= 80:
+                            strategy_result = run_strategy_competition(
+                                strategy_times, selected,
+                                horizon_steps=max(1, (horizon_days + 6) // 7),
+                                bar_seconds=7 * 86400,
+                                fee_bps=10, slippage_bps=5,
+                                round_trip_cost=0.002,
+                                minimum_net_return=0.002,
+                                max_drawdown=0.20,
+                            )
+                            range_result["technical_strategies"][horizon_name] = {
+                                "config": strategy_result["config"],
+                                "best_strategy": strategy_result["best_strategy"],
+                                "strategies": {
+                                    name: {"status": item["status"], "metrics": item["metrics"],
+                                           "trades": item["trades"]}
+                                    for name, item in strategy_result["strategies"].items()
+                                },
+                            }
+                        else:
+                            range_result["technical_strategies"][horizon_name] = {
+                                "status": "insufficient_history",
+                                "observations": len(selected),
+                                "required_observations": 80,
+                            }
                     results[range_name] = range_result
 
                 status = "research"
