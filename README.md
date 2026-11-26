@@ -92,7 +92,7 @@ For each stock/lookback/horizon:
 1. Construct supervised samples using the requested weekly-aligned future log return.
 2. Keep samples chronological; do not shuffle time-series rows.
 3. Evaluate candidates on a strictly later validation segment. Validation trade decisions are spaced at least one full forecast horizon apart, so overlapping positions are not counted as separate trades.
-4. Simulate long-only entries only when predicted return exceeds estimated round-trip costs (0.10% fee plus 0.05% slippage on each side; 0.30% total) and predicted net return must meet the 0.20% default minimum (at least 0.50% predicted gross return).
+4. Simulate long-only entries only when predicted return exceeds estimated round-trip costs (0.10% fee plus 0.05% slippage on each side; 0.20% total) and predicted net return must meet the 0.20% default minimum (at least 0.40% predicted gross return).
 5. Reject candidates with fewer than three validation trades, non-positive compounded net return, profit factor at or below 1.0, or maximum drawdown above 20%.
 6. Rank the remaining candidates by compounded net return divided by the larger of absolute maximum drawdown or 1%, then by profit factor and validation MAE.
 7. Refit the selected candidate at non-overlapping holdout origins using only labels already known at each origin; record holdout prediction and trading metrics.
