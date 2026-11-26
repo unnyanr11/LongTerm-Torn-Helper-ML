@@ -102,3 +102,103 @@ def optimize_portfolio(
         "risk_aversion": float(risk_aversion),
         "max_weight": float(max_weight),
     }
+
+def build_portfolio_research(
+    forecasts,
+    weekly_rows,
+    horizon_weeks,
+    *,
+    round_trip_cost=0.002,
+    minimum_net_return=0.002,
+    risk_aversion=4.0,
+    max_weight=0.15,
+    minimum_common_weeks=13,
+):
+    """Build a portfolio from validated forecasts and aligned weekly closes.
+
+    forecasts: iterable of mappings with stock_id, origin_price, predicted_price,
+    and validation (the stored forecast-validation JSON).
+    weekly_rows: iterable of (stock_id, week_start, close_price).
+    """
+    eligible = []
+    for row in forecasts:
+        validation = row.get("validation") or {}
+        if isinstance(validation, str):
+            import json
+            try:
+                validation = json.loads(validation)
+            except (TypeError, ValueError):
+                continue
+        horizon_validation = validation.get("horizon_validation", validation)
+        trading = horizon_validation.get("holdout_trading", {})
+        if horizon_validation.get("status") != "validated" or trading.get("eligible") is not True:
+            continue
+        try:
+            stock_id = int(row["stock_id"])
+            origin = float(row["origin_price"])
+            predicted = float(row["predicted_price"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not (math.isfinite(origin) and math.isfinite(predicted) and origin > 0 and predicted > 0):
+            continue
+        expected_net = predicted / origin - 1.0 - round_trip_cost
+        if expected_net >= minimum_net_return:
+            eligible.append((stock_id, expected_net))
+
+    if not eligible:
+        return {"status": "no_eligible_assets", "allocations": {}, "eligible_assets": 0}
+    eligible.sort(key=lambda item: item[0])
+    stock_ids = [item[0] for item in eligible]
+    expected = np.asarray([item[1] for item in eligible], dtype=float)
+
+    history = {stock_id: {} for stock_id in stock_ids}
+    for stock_id, week_start, close_price in weekly_rows:
+        stock_id = int(stock_id)
+        if stock_id not in history:
+            continue
+        price = float(close_price)
+        if math.isfinite(price) and price > 0:
+            history[stock_id][week_start] = price
+
+    common_weeks = set.intersection(*(set(history[sid]) for sid in stock_ids))
+    common_weeks = sorted(common_weeks)
+    if len(common_weeks) < minimum_common_weeks:
+        return {
+            "status": "insufficient_common_history",
+            "allocations": {},
+            "eligible_assets": len(stock_ids),
+            "common_weeks": len(common_weeks),
+            "minimum_common_weeks": minimum_common_weeks,
+        }
+
+    price_matrix = np.asarray(
+        [[history[sid][week] for week in common_weeks] for sid in stock_ids],
+        dtype=float,
+    )
+    weekly_returns = np.diff(np.log(price_matrix), axis=1)
+    covariance = np.atleast_2d(np.cov(weekly_returns, rowvar=True, ddof=1))
+    if len(stock_ids) == 1:
+        covariance = np.asarray([[float(np.var(weekly_returns[0], ddof=1))]])
+    covariance = covariance * max(1, int(horizon_weeks))
+    result = optimize_portfolio(
+        expected,
+        covariance,
+        risk_aversion=risk_aversion,
+        max_weight=max_weight,
+    )
+    result.update({
+        "status": "optimized",
+        "horizon_weeks": int(horizon_weeks),
+        "eligible_assets": len(stock_ids),
+        "common_weeks": len(common_weeks),
+        "allocations": {
+            str(stock_id): float(weight)
+            for stock_id, weight in zip(stock_ids, result["weights"])
+            if weight > 1e-8
+        },
+        "expected_net_returns_by_stock": {
+            str(stock_id): float(value)
+            for stock_id, value in zip(stock_ids, expected)
+        },
+    })
+    return result
