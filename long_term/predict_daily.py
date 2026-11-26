@@ -14,7 +14,8 @@ from .db import connect
 from .calibration import (apply_calibration, calibrate_matured_forecasts,
                           get_active_calibration)
 from .evaluation import horizon_weeks
-from .ml_forecaster import evaluate_ml_horizon
+from .ml_forecaster import (evaluate_ml_horizon, ROUND_TRIP_COST, MIN_EXPECTED_NET_RETURN)
+from .portfolio import build_portfolio_research
 from .stock_universe import STOCKS
 
 MODEL_NAME = "multi_model_ml_forecast"
@@ -94,6 +95,102 @@ def _forecast_signal(predicted_price, origin_price, validation):
     if -expected_return - float(trading.get("round_trip_cost", 0.002)) >= minimum_net:
         return "sell"
     return "wait"
+
+
+
+def _write_portfolio_allocations(conn, now):
+    """Persist research-only, cost-aware allocations for each forecast horizon.
+
+    A missing additive migration is non-fatal to ordinary stock predictions;
+    the savepoint keeps the surrounding prediction transaction usable.
+    """
+    from .evaluation import horizon_weeks
+
+    with conn.cursor() as cur:
+        cur.execute("SAVEPOINT portfolio_research")
+        try:
+            for _horizon_name, horizon_days in FORECAST_HORIZONS:
+                cur.execute(
+                    """select distinct on (f.stock_id)
+                              f.stock_id, f.origin_price, f.predicted_price,
+                              f.validation, f.origin_week
+                       from long_term.forecasts f
+                       where f.analysis_range_days = 365
+                         and f.horizon_days = %s
+                         and f.issued_at >= now() - interval '2 days'
+                       order by f.stock_id, f.issued_at desc, f.forecast_id desc""",
+                    (horizon_days,),
+                )
+                forecasts = cur.fetchall()
+                if not forecasts:
+                    print(f"Portfolio {horizon_days}d: no recent one-year-range forecasts")
+                    continue
+
+                stock_ids = [int(row[0]) for row in forecasts]
+                snapshot_week = max(row[4] for row in forecasts)
+                cur.execute(
+                    """select stock_id, week_start, close_price
+                       from long_term.weekly_prices
+                       where stock_id = any(%s)
+                         and week_start >= %s - interval '730 days'
+                         and week_start <= %s
+                         and is_complete = true
+                         and close_price is not null and close_price > 0
+                       order by stock_id, week_start""",
+                    (stock_ids, snapshot_week, snapshot_week),
+                )
+                weekly_rows = cur.fetchall()
+                forecast_inputs = [
+                    {
+                        "stock_id": row[0],
+                        "origin_price": row[1],
+                        "predicted_price": row[2],
+                        "validation": row[3],
+                    }
+                    for row in forecasts
+                ]
+                result = build_portfolio_research(
+                    forecast_inputs,
+                    weekly_rows,
+                    horizon_weeks(horizon_days),
+                    round_trip_cost=ROUND_TRIP_COST,
+                    minimum_net_return=MIN_EXPECTED_NET_RETURN,
+                )
+                allocations = result.get("allocations", {})
+                metrics = {
+                    key: value for key, value in result.items()
+                    if key not in ("allocations", "weights", "expected_net_returns_by_stock")
+                }
+                cur.execute(
+                    """insert into long_term.portfolio_allocations
+                       (snapshot_week, analysis_range_days, horizon_days, status,
+                        eligible_assets, allocations, metrics)
+                       values (%s,365,%s,%s,%s,%s::jsonb,%s::jsonb)
+                       on conflict (snapshot_week, analysis_range_days, horizon_days)
+                       do update set status=excluded.status,
+                         eligible_assets=excluded.eligible_assets,
+                         allocations=excluded.allocations,
+                         metrics=excluded.metrics,
+                         created_at=now()""",
+                    (
+                        snapshot_week, horizon_days, result["status"],
+                        int(result.get("eligible_assets", 0)),
+                        json.dumps(allocations), json.dumps(metrics),
+                    ),
+                )
+                print(
+                    f"Portfolio {horizon_days}d: {result['status']}; "
+                    f"{result.get('eligible_assets', 0)} eligible assets; "
+                    f"{len(allocations)} allocated positions"
+                )
+            cur.execute("RELEASE SAVEPOINT portfolio_research")
+        except Exception as exc:
+            cur.execute("ROLLBACK TO SAVEPOINT portfolio_research")
+            cur.execute("RELEASE SAVEPOINT portfolio_research")
+            print(
+                "Portfolio research skipped without interrupting forecasts: "
+                f"{type(exc).__name__}: {exc}"
+            )
 
 def run():
     now = datetime.now(timezone.utc)
@@ -258,6 +355,7 @@ def run():
                     f"{supported}/91 combinations generated"
                 )
 
+        _write_portfolio_allocations(conn, now)
         conn.commit()
 
     print(
