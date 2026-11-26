@@ -86,12 +86,13 @@ class MultiModelForecastTests(unittest.TestCase):
             "status": "validated",
             "holdout_trading": {
                 "eligible": True,
-                "round_trip_cost": 0.003,
+                "round_trip_cost": 0.002,
                 "minimum_expected_net_return": 0.002,
             },
         }
         self.assertEqual(_forecast_signal(100.6, 100.0, validated), "buy")
-        self.assertEqual(_forecast_signal(100.4, 100.0, validated), "wait")
+        self.assertEqual(_forecast_signal(100.3, 100.0, validated), "wait")
+        self.assertEqual(_forecast_signal(99.7, 100.0, validated), "wait")
         self.assertEqual(_forecast_signal(99.4, 100.0, validated), "sell")
         self.assertEqual(_forecast_signal(110.0, 100.0, {**validated, "status": "rejected"}), "wait")
         self.assertEqual(_forecast_signal(110.0, 100.0, {"status": "validated", "holdout_trading": {"eligible": False}}), "wait")
