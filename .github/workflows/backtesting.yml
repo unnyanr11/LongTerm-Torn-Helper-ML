@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'long_term/backtest.py'
+      - 'long_term/ml_forecaster.py'
+      - 'long_term/calibration.py'
   workflow_dispatch:
 
 permissions:
@@ -52,6 +54,4 @@ jobs:
       - name: Backtest all stocks, windows and horizons
         env:
           LONG_TERM_DATABASE_URL: ${{ secrets.LONG_TERM_DATABASE_URL }}
-          LONG_MIN_EXPECTED_NET_RETURN: ${{ vars.LONG_MIN_EXPECTED_NET_RETURN || '0.002' }}
-          LONG_ROUND_TRIP_COST: ${{ vars.LONG_ROUND_TRIP_COST || '0.002' }}
         run: python -m long_term.backtest
