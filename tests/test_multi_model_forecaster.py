@@ -38,7 +38,8 @@ class MultiModelForecastTests(unittest.TestCase):
         result = evaluate_ml_horizon(prices, 7)
         self.assertEqual(result["status"], "validated")
         self.assertIn(result["selected_model"], {
-            "ridge", "random_forest", "extra_trees", "hist_gradient_boosting"
+            "ridge", "elastic_net", "random_forest", "extra_trees",
+            "hist_gradient_boosting", "ensemble"
         })
         self.assertGreaterEqual(result["holdout_folds"], 3)
         self.assertGreaterEqual(result["holdout"]["observations"], 3)
