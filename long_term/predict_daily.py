@@ -71,7 +71,7 @@ def _range_rows(rows, cutoff, days):
 def _forecast_signal(predicted_price, origin_price, validation):
     """Return a trade signal only when this exact horizon passed holdout checks.
 
-    Returns are fractions, not percentage points. The 0.3% round-trip cost
+    Returns are fractions, not percentage points. The 0.2% round-trip cost
     and 0.2% minimum net return match ml_forecaster's backtest assumptions.
     """
     if not isinstance(validation, dict) or validation.get("status") != "validated":
@@ -87,11 +87,11 @@ def _forecast_signal(predicted_price, origin_price, validation):
     if not math.isfinite(predicted) or not math.isfinite(origin) or predicted <= 0 or origin <= 0:
         return "wait"
     expected_return = predicted / origin - 1.0
-    net_upside = expected_return - float(trading.get("round_trip_cost", 0.003))
+    net_upside = expected_return - float(trading.get("round_trip_cost", 0.002))
     minimum_net = float(trading.get("minimum_expected_net_return", 0.002))
     if net_upside >= minimum_net:
         return "buy"
-    if -expected_return - float(trading.get("round_trip_cost", 0.003)) >= minimum_net:
+    if -expected_return - float(trading.get("round_trip_cost", 0.002)) >= minimum_net:
         return "sell"
     return "wait"
 
