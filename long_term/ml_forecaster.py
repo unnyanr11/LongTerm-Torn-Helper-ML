@@ -265,12 +265,46 @@ def evaluate_ml_horizon(prices, horizon_days, *, round_trip_cost=ROUND_TRIP_COST
         positions = np.linspace(0, len(test_origins) - 1, MAX_TEST_FOLDS, dtype=int)
         test_origins = test_origins[positions]
     model_actual, model_pred, fold_detail = [], [], []
+    fold_model_selection = []
     for origin in test_origins:
         train_idx = np.flatnonzero(target_indices <= origin)
         test_idx = np.flatnonzero(origins == origin)
         if len(train_idx) < MIN_SUPERVISED_ROWS or len(test_idx) == 0:
             continue
-        model = _models()[winner]
+
+        # Re-run model competition at each expanding origin. The inner
+        # chronological validation labels are purged before the first
+        # validation origin, so no overlapping future target leaks backwards.
+        fold_winner = winner
+        fold_selection_status = "retained_initial_selection_insufficient_fold_history"
+        if len(train_idx) >= (MIN_SUPERVISED_ROWS * 2 + MIN_VALIDATION_TRADES):
+            split_at = max(MIN_SUPERVISED_ROWS, int(len(train_idx) * 0.75))
+            fold_valid_idx = train_idx[split_at:]
+            if len(fold_valid_idx) >= MIN_VALIDATION_TRADES:
+                first_valid_origin = int(origins[fold_valid_idx[0]])
+                fold_train_idx = train_idx[
+                    target_indices[train_idx] < first_valid_origin
+                ]
+                if len(fold_train_idx) >= MIN_SUPERVISED_ROWS:
+                    candidate, fold_selection = _select_model(
+                        X[fold_train_idx], y[fold_train_idx],
+                        X[fold_valid_idx], y[fold_valid_idx],
+                        origins[fold_valid_idx], step,
+                        round_trip_cost=round_trip_cost,
+                        minimum_net_return=minimum_net_return,
+                    )
+                    if candidate is not None:
+                        fold_winner = candidate
+                        fold_selection_status = fold_selection.get("status", "selected")
+                    else:
+                        fold_selection_status = fold_selection.get("status", "fallback")
+        fold_model_selection.append({
+            "origin_index": int(origin),
+            "selected_model": fold_winner,
+            "selection_status": fold_selection_status,
+        })
+
+        model = _models()[fold_winner]
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", ConvergenceWarning)
             model.fit(X[train_idx], y[train_idx])
@@ -283,6 +317,7 @@ def evaluate_ml_horizon(prices, horizon_days, *, round_trip_cost=ROUND_TRIP_COST
             "target_index": int(target_indices[test_idx[0]]),
             "predicted_log_return": prediction,
             "actual_log_return": actual,
+            "selected_model": fold_winner,
         })
 
     if len(model_actual) < MIN_TEST_FOLDS:
@@ -299,7 +334,9 @@ def evaluate_ml_horizon(prices, horizon_days, *, round_trip_cost=ROUND_TRIP_COST
     holdout_non_overlap = _strategy_metrics(model_actual, model_pred, round_trip_cost=round_trip_cost,
                                                minimum_net_return=minimum_net_return)
     final_train_idx = np.flatnonzero(target_indices <= len(values) - 1)
-    latest_model = _models()[winner]
+    latest_selected_model = (fold_model_selection[-1]["selected_model"]
+                             if fold_model_selection else winner)
+    latest_model = _models()[latest_selected_model]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", ConvergenceWarning)
         latest_model.fit(X[final_train_idx], y[final_train_idx])
@@ -312,8 +349,9 @@ def evaluate_ml_horizon(prices, horizon_days, *, round_trip_cost=ROUND_TRIP_COST
         "status": status,
         "horizon_days": int(horizon_days),
         "effective_horizon_weeks": max(1, math.ceil(horizon_days / 7)),
-        "selected_model": winner,
-        "selection": selection,
+        "selected_model": latest_selected_model,
+        "initial_selection": selection,
+        "fold_model_selection": fold_model_selection,
         "training_rows": int(len(X_train)),
         "validation_rows": int(len(X_valid)),
         "holdout_folds": int(len(model_actual)),
