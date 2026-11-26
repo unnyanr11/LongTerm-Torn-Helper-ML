@@ -50,6 +50,17 @@ def run():
                         range_result["horizons"][horizon_name] = evaluation
                         any_validated = any_validated or evaluation.get("status") == "validated"
                         if len(selected) >= 80:
+                            # Keep indicator warm-up and model-selection history in the
+                            # first 70%; evaluate strategy trades only on the later,
+                            # untouched chronological holdout segment.
+                            strategy_evaluation_index = max(55, int(len(strategy_times) * 0.70))
+                            strategy_evaluation_start = strategy_times[strategy_evaluation_index]
+                            range_result["technical_strategy_evaluation"] = {
+                                "method": "first 70% causal history for indicator warm-up; final 30% untouched chronological holdout",
+                                "training_observations": strategy_evaluation_index,
+                                "holdout_observations": len(strategy_times) - strategy_evaluation_index,
+                                "holdout_start_week": selected_rows[strategy_evaluation_index][0].isoformat(),
+                            }
                             strategy_result = run_strategy_competition(
                                 strategy_times, selected,
                                 horizon_steps=max(1, (horizon_days + 6) // 7),
@@ -58,8 +69,11 @@ def run():
                                 round_trip_cost=0.002,
                                 minimum_net_return=0.002,
                                 max_drawdown=0.20,
+                                evaluation_start=strategy_evaluation_start,
                             )
                             range_result["technical_strategies"][horizon_name] = {
+                                "evaluation_method": "final_30_percent_chronological_holdout",
+                                "evaluation_start_week": selected_rows[strategy_evaluation_index][0].isoformat(),
                                 "config": strategy_result["config"],
                                 "best_strategy": strategy_result["best_strategy"],
                                 "best_strategy_for_current_regime": strategy_result.get("best_strategy_for_current_regime"),
